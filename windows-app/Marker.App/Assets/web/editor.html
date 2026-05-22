@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Marker — Rich Mode</title>
+  <link rel="stylesheet" href="toastui-editor.min.css" />
+  <link rel="stylesheet" href="toastui-editor-dark.min.css" />
+  <style>
+    html, body { height: 100%; margin: 0; padding: 0; }
+    #editor { height: 100vh; }
+    body.marker-dark { background: #1e1e1e; }
+  </style>
+</head>
+<body>
+  <div id="editor"></div>
+  <script src="toastui-editor-all.min.js"></script>
+  <script>
+    // ----------------------------------------------------------------
+    // Rich (WYSIWYG) markdown editor host.
+    //
+    // Protocol with the WPF host (window.chrome.webview):
+    //   host -> page : { type: 'setMarkdown', markdown }
+    //   page -> host : { type: 'ready' }              (editor created)
+    //   page -> host : { type: 'change', markdown }   (user edited)
+    //
+    // 'suppress' guards the change event while the host pushes content in,
+    // so loading a document never reports a spurious edit.
+    //
+    // The theme ('light' | 'dark') arrives as a query-string parameter; the
+    // host re-navigates this page whenever the app theme changes.
+    // ----------------------------------------------------------------
+    let editor;
+    let suppress = false;
+
+    function postToHost(message) {
+      window.chrome.webview.postMessage(JSON.stringify(message));
+    }
+
+    function createEditor(theme) {
+      const dark = theme === 'dark';
+      if (dark) document.body.classList.add('marker-dark');
+
+      editor = new toastui.Editor({
+        el: document.getElementById('editor'),
+        height: '100%',
+        initialEditType: 'wysiwyg',
+        previewStyle: 'tab',
+        hideModeSwitch: true,
+        usageStatistics: false,
+        theme: dark ? 'dark' : 'default',
+        events: {
+          change: function () {
+            if (suppress) return;
+            postToHost({ type: 'change', markdown: editor.getMarkdown() });
+          }
+        }
+      });
+    }
+
+    function setMarkdown(md) {
+      // Replace content without raising a change back to the host.
+      suppress = true;
+      editor.setMarkdown(md || '', false);
+      suppress = false;
+    }
+
+    window.chrome.webview.addEventListener('message', function (e) {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'setMarkdown') {
+        setMarkdown(msg.markdown);
+      }
+    });
+
+    window.addEventListener('DOMContentLoaded', function () {
+      const theme = new URLSearchParams(location.search).get('theme');
+      createEditor(theme);
+      postToHost({ type: 'ready' });
+    });
+  </script>
+</body>
+</html>

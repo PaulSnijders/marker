@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<SyntaxDefinition name="Markdown" extensions=".md;.markdown"
+                  xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+
+  <Color name="Heading"    foreground="#4F86C6" fontWeight="bold" />
+  <Color name="Bold"       foreground="#C18401" fontWeight="bold" />
+  <Color name="Italic"     foreground="#C18401" fontStyle="italic" />
+  <Color name="Code"       foreground="#A24B57" />
+  <Color name="Link"       foreground="#2AA198" />
+  <Color name="Quote"      foreground="#6A9955" fontStyle="italic" />
+  <Color name="ListMarker" foreground="#B07219" fontWeight="bold" />
+  <Color name="Rule"       foreground="#808080" />
+
+  <RuleSet ignoreCase="false">
+
+    <!-- Fenced code block -->
+    <Span color="Code" multiline="true">
+      <Begin>```</Begin>
+      <End>```</End>
+    </Span>
+
+    <!-- ATX headings -->
+    <Rule color="Heading">^\#{1,6}[ \t].*$</Rule>
+
+    <!-- Blockquote -->
+    <Rule color="Quote">^[ \t]*&gt;.*$</Rule>
+
+    <!-- Horizontal rule (no back-reference: AvalonEdit's regex rejects them) -->
+    <Rule color="Rule">^[ \t]*(-{3,}|\*{3,}|_{3,})[ \t]*$</Rule>
+
+    <!-- List markers -->
+    <Rule color="ListMarker">^[ \t]*([-*+]|[0-9]+\.)[ \t]</Rule>
+
+    <!-- Inline emphasis (bold before italic so ** wins) -->
+    <Span color="Bold"><Begin>\*\*</Begin><End>\*\*</End></Span>
+    <Span color="Bold"><Begin>__</Begin><End>__</End></Span>
+    <Span color="Italic"><Begin>(?&lt;![\w*])\*(?![ \t*])</Begin><End>\*</End></Span>
+    <Span color="Code"><Begin>`</Begin><End>`</End></Span>
+
+    <!-- Links and images -->
+    <Rule color="Link">!?\[[^\]]*\]\([^\)]*\)</Rule>
+
+  </RuleSet>
+</SyntaxDefinition>

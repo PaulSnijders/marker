@@ -1,0 +1,51 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Dark theme palette. Same brush keys as Light.xaml. -->
+    <Color x:Key="C_Window">#FF1E1E1E</Color>
+    <Color x:Key="C_Panel">#FF252526</Color>
+    <Color x:Key="C_Editor">#FF1E1E1E</Color>
+    <Color x:Key="C_Foreground">#FFE4E4E4</Color>
+    <Color x:Key="C_Muted">#FF9A9A9A</Color>
+    <Color x:Key="C_Border">#FF3C3C3C</Color>
+    <Color x:Key="C_Accent">#FF4F8CFF</Color>
+    <Color x:Key="C_Hover">#FF2D2D30</Color>
+    <Color x:Key="C_Selected">#FF37446B</Color>
+    <Color x:Key="C_TabBar">#FF2D2D2D</Color>
+    <Color x:Key="C_TabActive">#FF1E1E1E</Color>
+    <Color x:Key="C_StatusBar">#FF0E639C</Color>
+    <Color x:Key="C_StatusText">#FFFFFFFF</Color>
+
+    <SolidColorBrush x:Key="AppBackground"      Color="{StaticResource C_Window}" />
+    <SolidColorBrush x:Key="PanelBackground"    Color="{StaticResource C_Panel}" />
+    <SolidColorBrush x:Key="EditorBackground"   Color="{StaticResource C_Editor}" />
+    <SolidColorBrush x:Key="AppForeground"      Color="{StaticResource C_Foreground}" />
+    <SolidColorBrush x:Key="MutedForeground"    Color="{StaticResource C_Muted}" />
+    <SolidColorBrush x:Key="BorderBrushColor"   Color="{StaticResource C_Border}" />
+    <SolidColorBrush x:Key="AccentBrush"        Color="{StaticResource C_Accent}" />
+    <SolidColorBrush x:Key="HoverBackground"    Color="{StaticResource C_Hover}" />
+    <SolidColorBrush x:Key="SelectedBackground" Color="{StaticResource C_Selected}" />
+    <SolidColorBrush x:Key="TabBarBackground"   Color="{StaticResource C_TabBar}" />
+    <SolidColorBrush x:Key="TabActiveBackground" Color="{StaticResource C_TabActive}" />
+    <SolidColorBrush x:Key="StatusBarBackground" Color="{StaticResource C_StatusBar}" />
+    <SolidColorBrush x:Key="StatusBarForeground" Color="{StaticResource C_StatusText}" />
+
+    <!-- Scrollbars -->
+    <Color x:Key="C_ScrollThumb">#FF4A4A4A</Color>
+    <Color x:Key="C_ScrollThumbHover">#FF5F5F5F</Color>
+    <SolidColorBrush x:Key="ScrollBarBackground"  Color="{StaticResource C_Panel}" />
+    <SolidColorBrush x:Key="ScrollBarThumb"       Color="{StaticResource C_ScrollThumb}" />
+    <SolidColorBrush x:Key="ScrollBarThumbHover"  Color="{StaticResource C_ScrollThumbHover}" />
+
+    <!-- Themed selection: overrides the system colours used by stock
+         templates (TreeView, ListBox) so selection follows the theme. -->
+    <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}"
+                     Color="{StaticResource C_Selected}" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}"
+                     Color="{StaticResource C_Foreground}" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}"
+                     Color="{StaticResource C_Hover}" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightTextBrushKey}"
+                     Color="{StaticResource C_Foreground}" />
+
+</ResourceDictionary>

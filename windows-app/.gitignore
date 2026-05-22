@@ -1,0 +1,10 @@
+# Build output
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+
+# WebView2 runtime / generated read-mode page
+**/web/__read.html

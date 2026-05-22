@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Marker.App/Marker.App.csproj" />
+  <Project Path="Marker.Core/Marker.Core.csproj" />
+</Solution>

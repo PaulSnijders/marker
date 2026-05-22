@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<SyntaxDefinition name="YAML" extensions=".yaml;.yml"
+                  xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+
+  <Color name="Comment"    foreground="#6A9955" fontStyle="italic" />
+  <Color name="Key"        foreground="#3B7DBB" fontWeight="bold" />
+  <Color name="String"     foreground="#A24B57" />
+  <Color name="Number"     foreground="#098658" />
+  <Color name="Keyword"    foreground="#0000FF" fontWeight="bold" />
+  <Color name="ListMarker" foreground="#B07219" fontWeight="bold" />
+  <Color name="Anchor"     foreground="#AF00DB" />
+
+  <RuleSet ignoreCase="false">
+
+    <Span color="Comment">
+      <Begin>\#</Begin>
+      <End>$</End>
+    </Span>
+
+    <Span color="String"><Begin>"</Begin><End>"</End></Span>
+    <Span color="String"><Begin>'</Begin><End>'</End></Span>
+
+    <!-- Mapping key (optionally after a "- " sequence marker) -->
+    <Rule color="Key">^[ \t]*(-[ \t]+)?[\w.\-/]+(?=[ \t]*:)</Rule>
+
+    <Rule color="ListMarker">^[ \t]*-[ \t]</Rule>
+    <Rule color="Keyword">\b(true|false|null|yes|no|on|off|~)\b</Rule>
+    <Rule color="Number">\b-?[0-9]+(\.[0-9]+)?\b</Rule>
+    <Rule color="Anchor">[&amp;*][\w\-]+</Rule>
+
+  </RuleSet>
+</SyntaxDefinition>

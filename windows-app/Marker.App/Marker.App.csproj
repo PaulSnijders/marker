@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Marker.App: WPF executable. Views, view models, app composition. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>Marker.App</RootNamespace>
+    <AssemblyName>Marker</AssemblyName>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <Version>1.0.0</Version>
+    <Product>Marker</Product>
+    <Authors>Paul Snijders</Authors>
+    <Copyright>Copyright © 2026 Paul Snijders</Copyright>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AvalonEdit" Version="6.*" />
+    <PackageReference Include="Markdig" Version="0.*" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.*" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Marker.Core\Marker.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Custom AvalonEdit highlighting definitions + the window icon, embedded. -->
+  <ItemGroup>
+    <Resource Include="Assets\Syntax\*.xshd" />
+    <Resource Include="Assets\icon-marker.png" />
+  </ItemGroup>
+
+  <!-- Splash screen: shown by native code instantly on launch (no white flash,
+       no added delay) and dismissed when the main window first renders. -->
+  <ItemGroup>
+    <SplashScreen Include="Assets\splash.png" />
+  </ItemGroup>
+
+  <!-- Bundled web assets (TOAST UI Editor, highlight.js) copied next to exe. -->
+  <ItemGroup>
+    <Content Include="Assets\web\**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>web\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Content>
+  </ItemGroup>
+
+  <!-- Bundled help document, opened from the Help menu. -->
+  <ItemGroup>
+    <Content Include="Assets\help.md">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>
