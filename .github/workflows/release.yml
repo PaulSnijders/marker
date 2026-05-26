@@ -1,0 +1,130 @@
+name: Release
+
+# Builds Marker, publishes a GitHub Release with a verifiable zip, and opens a
+# winget update PR. Triggered by pushing a version tag (e.g. `v1.0.0`).
+# `workflow_dispatch` runs a build-only dry run that uploads the zip as an
+# artifact — no Release, no winget PR.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write       # create the GitHub Release
+  id-token: write       # build-provenance attestation
+  attestations: write   # build-provenance attestation
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Determine version
+        id: version
+        shell: pwsh
+        run: |
+          if ('${{ github.ref_type }}' -eq 'tag') {
+            $version = '${{ github.ref_name }}'.TrimStart('v')
+            $isTag = 'true'
+          } else {
+            $version = '0.0.0-dev'
+            $isTag = 'false'
+          }
+          $prerelease = if ($version -match '-') { 'true' } else { 'false' }
+          "version=$version"       | Out-File $env:GITHUB_OUTPUT -Append
+          "is_tag=$isTag"          | Out-File $env:GITHUB_OUTPUT -Append
+          "prerelease=$prerelease" | Out-File $env:GITHUB_OUTPUT -Append
+          Write-Host "version=$version is_tag=$isTag prerelease=$prerelease"
+
+      - name: Publish
+        shell: pwsh
+        run: |
+          dotnet publish windows-app/Marker.App/Marker.App.csproj `
+            -c Release -r win-x64 --self-contained false `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=none `
+            -p:Version=${{ steps.version.outputs.version }} `
+            -o publish
+          # Drop cruft that bloats the zip: package XML doc files and stray pdbs.
+          Remove-Item publish/*.xml, publish/*.pdb -ErrorAction SilentlyContinue
+
+      - name: Package
+        id: package
+        shell: pwsh
+        run: |
+          $name = "Marker-${{ steps.version.outputs.version }}-win-x64"
+          Compress-Archive -Path publish/* -DestinationPath "$name.zip" -Force
+          $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Out-File "$name.zip.sha256" -Encoding ascii
+          "name=$name"   | Out-File $env:GITHUB_OUTPUT -Append
+          "sha256=$hash" | Out-File $env:GITHUB_OUTPUT -Append
+          Write-Host "SHA256: $hash"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ steps.package.outputs.name }}.zip
+
+      - name: Upload dry-run artifact
+        if: steps.version.outputs.is_tag == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: |
+            ${{ steps.package.outputs.name }}.zip
+            ${{ steps.package.outputs.name }}.zip.sha256
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.is_tag == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag  = '${{ github.ref_name }}'
+          $name = '${{ steps.package.outputs.name }}'
+          $ghArgs = @($tag, "$name.zip", "$name.zip.sha256",
+                      '--title', $tag, '--generate-notes')
+          if ('${{ steps.version.outputs.prerelease }}' -eq 'true') {
+            $ghArgs += '--prerelease'
+          }
+          gh release create @ghArgs
+
+          # Append a fixed footer with the trust/verification info.
+          $footer = @"
+
+          ---
+          ### Verifying this download
+
+          - **SHA256:** ``${{ steps.package.outputs.sha256 }}``
+          - Built in public CI from ``$tag`` — not on a developer's machine.
+            Verify the build provenance with:
+            ``gh attestation verify $name.zip --repo ${{ github.repository }}``
+          - Installing via ``winget`` checks this hash automatically.
+          "@
+          $body = gh release view $tag --json body -q .body
+          gh release edit $tag --notes ($body + "`n" + $footer)
+
+      - name: Submit to winget
+        # Skipped for prereleases — only stable versions go to the winget catalog.
+        if: steps.version.outputs.is_tag == 'true' && steps.version.outputs.prerelease == 'false'
+        shell: pwsh
+        run: |
+          $name = '${{ steps.package.outputs.name }}'
+          $url  = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/$name.zip"
+          Invoke-WebRequest -Uri 'https://aka.ms/wingetcreate/latest' -OutFile wingetcreate.exe
+          ./wingetcreate.exe update PaulSnijders.Marker `
+            --version '${{ steps.version.outputs.version }}' `
+            --urls "$url" `
+            --submit `
+            --token '${{ secrets.WINGET_TOKEN }}'

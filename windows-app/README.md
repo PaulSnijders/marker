@@ -34,6 +34,20 @@ Files on disk stay plain files — no proprietary format, no database, no lock-i
   for the rich and read markdown modes (preinstalled on current Windows; the
   app degrades gracefully to source mode if it is missing)
 
+## Install
+
+```sh
+winget install PaulSnijders.Marker
+```
+
+This pulls in the .NET 10 Desktop Runtime automatically if it is missing. Or
+grab the zip from the [Releases page](https://github.com/PaulSnijders/marker/releases),
+extract it, and run `Marker.exe`.
+
+Each release is built in public CI from a tagged commit and carries a
+[build-provenance attestation](https://docs.github.com/actions/security-guides/using-artifact-attestations);
+the winget manifest pins a SHA256 that winget verifies on download.
+
 ## Build & run
 
 ```sh
