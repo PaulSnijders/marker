@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: PaulSnijders.Marker
+PackageVersion: 1.0.0
+PackageLocale: en-US
+Publisher: Paul Snijders
+PublisherUrl: https://github.com/PaulSnijders
+PackageName: Marker
+PackageUrl: https://github.com/PaulSnijders/marker
+License: MIT
+LicenseUrl: https://github.com/PaulSnijders/marker/blob/main/windows-app/LICENSE
+Copyright: Copyright (c) 2026 Paul Snijders
+Moniker: marker
+ShortDescription: A fast, lightweight local file editor for Windows — a friendlier replacement for Notepad.
+Description: |-
+  Marker is a fast, lightweight local file editor for Windows — a friendlier
+  replacement for Notepad for daily note-taking and casual editing of text
+  files. It has workspaces, a live file tree, a tabbed editor, markdown editing
+  three ways (source, WYSIWYG, rendered), per-workspace scratchpads, and light
+  and dark themes. Files on disk stay plain files — no proprietary format.
+Tags:
+  - editor
+  - markdown
+  - notepad
+  - text-editor
+  - notes
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
