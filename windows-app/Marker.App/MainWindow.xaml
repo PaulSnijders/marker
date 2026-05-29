@@ -89,7 +89,7 @@
                                 <TextBlock x:Name="TitleText" Text="{Binding Title}"
                                            VerticalAlignment="Center"
                                            Foreground="{DynamicResource AppForeground}" />
-                                <Button Content=""
+                                <Button Content="&#xE711;"
                                         Style="{StaticResource FlatIconButton}"
                                         FontFamily="Segoe MDL2 Assets" FontSize="9"
                                         Margin="8,0,0,0" Padding="3"

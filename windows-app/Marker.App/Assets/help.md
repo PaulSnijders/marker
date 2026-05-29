@@ -56,13 +56,26 @@ Need to jot something down? Click the notepad icon on the right of the tab
 strip. It's a markdown file — so you get highlighting and the Source / Rich /
 Read modes — always one keystroke away, and every workspace keeps its own.
 
+## Saving — usually nothing to think about
+
+Marker auto-saves by default. Your work is written to disk whenever you:
+
+- **Switch to another tab** — the tab you're leaving is saved.
+- **Switch to another window** (Alt-Tab, click another app, lock the screen).
+- **Close a tab or the window** — saved silently, no "save changes?" prompt.
+
+You can of course still save by hand — **Ctrl+S** for the current tab,
+**Ctrl+Shift+S** for all of them.
+
+Prefer the classic *"did you mean to save that?"* dance? Open
+`%APPDATA%\Marker\settings.json` and set `"AutoSave": false` — Marker will
+then prompt you on close like Notepad does.
+
 ## Make it yours
 
 - Toggle **light / dark** theme from the **View** menu — the whole app
   follows along.
 - Set a comfortable **editor font size** under **View ▸ Editor Font Size**.
-- **Auto-save** keeps your work safe; turn it off in settings if you'd rather
-  save by hand.
 
 ## Handy shortcuts
 

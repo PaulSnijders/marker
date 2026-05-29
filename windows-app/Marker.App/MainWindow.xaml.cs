@@ -48,6 +48,8 @@ public partial class MainWindow : Window
     private EditorTabViewModel? _previewTab;     // current sneak-peek tab, if any
     private bool _suppressEditorFocus;           // skip auto-focusing the editor once
 
+    private ICSharpCode.AvalonEdit.Search.SearchPanel? _searchPanel; // installed once; keeps SearchPattern across Close/Open
+
     private string ReadFilePath => Path.Combine(AppServices.WebRoot, "__read.html");
 
     public MainWindow()
@@ -164,7 +166,9 @@ public partial class MainWindow : Window
         // Small gap between the line-number margin and the text.
         Editor.TextArea.LeftMargins.Add(new Border { Width = 6 });
 
-        SearchPanel.Install(Editor);
+        // Install once and keep the reference — SearchPanel.Install creates a
+        // *new* panel each call, which would wipe the remembered SearchPattern.
+        _searchPanel = SearchPanel.Install(Editor);
         Editor.TextArea.Caret.PositionChanged += (_, _) =>
         {
             if (_currentTab is not null)
@@ -173,6 +177,91 @@ public partial class MainWindow : Window
                 _currentTab.CaretColumn = Editor.TextArea.Caret.Column;
             }
         };
+
+        // Strip the CF_HTML clipboard format that AvalonEdit adds on copy/cut.
+        // WPF's DataObject.SetText(..., TextDataFormat.Html) writes those bytes
+        // in the system ANSI code page (CP1252 on most installs) instead of
+        // UTF-8 as the CF_HTML spec requires, so emoji and other non-Latin-1
+        // characters become "?" when pasted into rich-text targets (Word,
+        // Outlook, OneNote, browsers). CF_UNICODETEXT is fine on its own.
+        //
+        // Copy: intercept via DataObject.Copying and re-publish plain text.
+        // Cut:  can't reuse that path — cancelling Copying also cancels
+        //       AvalonEdit's subsequent delete step, so the user sees
+        //       "copy but no cut". Instead, install our own Cut binding.
+        //       AvalonEdit's default input handler ALSO adds an instance Cut
+        //       binding into TextArea.CommandBindings at construction time,
+        //       and CommandManager walks that collection from index 0 and
+        //       stops at the first handler that sets Handled = true. So we
+        //       must Insert(0, ...) at the front, not Add.
+        DataObject.AddCopyingHandler(Editor, OnEditorCopying);
+        Editor.TextArea.CommandBindings.Insert(0,
+            new CommandBinding(ApplicationCommands.Cut, OnEditorCut));
+    }
+
+    /// <summary>
+    /// Replaces AvalonEdit's multi-format Copy payload with plain
+    /// CF_UNICODETEXT only, sidestepping the WPF CF_HTML encoding bug that
+    /// mangles emoji on paste into rich-text apps.
+    /// </summary>
+    private static void OnEditorCopying(object sender, DataObjectCopyingEventArgs e)
+    {
+        if (!e.DataObject.GetDataPresent(DataFormats.UnicodeText)) return;
+        if (!e.DataObject.GetDataPresent(DataFormats.Html)) return;
+
+        string? text = e.DataObject.GetData(DataFormats.UnicodeText) as string;
+        if (text is null) return;
+
+        // Cancel AvalonEdit's own SetDataObject call and re-publish plain text.
+        e.CancelCommand();
+        TrySetClipboardText(text);
+    }
+
+    /// <summary>
+    /// Handles Ctrl+X. We can't piggy-back on the Copying handler because
+    /// cancelling it also cancels AvalonEdit's delete step. So we replicate
+    /// AvalonEdit's Cut semantics here: copy the selection (or whole line, if
+    /// the selection is empty and <see cref="ICSharpCode.AvalonEdit.TextEditorOptions.CutCopyWholeLine"/>
+    /// is on), then delete it. Only writes CF_UNICODETEXT.
+    /// </summary>
+    private void OnEditorCut(object sender, ExecutedRoutedEventArgs e)
+    {
+        var ta = Editor.TextArea;
+        if (ta?.Document is null) return;
+
+        if (!ta.Selection.IsEmpty)
+        {
+            if (!TrySetClipboardText(ta.Selection.GetText())) return;
+            ta.Selection.ReplaceSelectionWithText(string.Empty);
+        }
+        else if (ta.Options.CutCopyWholeLine)
+        {
+            var line = ta.Document.GetLineByNumber(ta.Caret.Line);
+            string text = ta.Document.GetText(line.Offset, line.TotalLength);
+            if (!TrySetClipboardText(text)) return;
+            ta.Document.Remove(line.Offset, line.TotalLength);
+        }
+        else
+        {
+            return;
+        }
+
+        ta.Caret.BringCaretToView();
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// Writes the text to the clipboard as CF_UNICODETEXT only, with a single
+    /// retry to ride out brief contention from other clipboard listeners.
+    /// </summary>
+    private static bool TrySetClipboardText(string text)
+    {
+        try { Clipboard.SetText(text, TextDataFormat.UnicodeText); return true; }
+        catch
+        {
+            try { Clipboard.SetText(text, TextDataFormat.UnicodeText); return true; }
+            catch { return false; }
+        }
     }
 
     private async Task InitializeWebViewAsync()
@@ -1545,13 +1634,30 @@ public partial class MainWindow : Window
 
     private void OnFind(object sender, RoutedEventArgs e)
     {
-        if (Editor.Visibility != Visibility.Visible)
+        if (Editor.Visibility != Visibility.Visible || _searchPanel is null)
             return;
-        var panel = SearchPanel.Install(Editor);
-        panel.Open();
+        _searchPanel.Open();
+        // Selection wins; otherwise leave the previous SearchPattern in place so
+        // Reactivate's SelectAll lets the user either retype or just hit Enter.
         if (!string.IsNullOrEmpty(Editor.SelectedText))
-            panel.SearchPattern = Editor.SelectedText;
-        Dispatcher.BeginInvoke(() => panel.Reactivate(), DispatcherPriority.Input);
+            _searchPanel.SearchPattern = Editor.SelectedText;
+        Dispatcher.BeginInvoke(() => _searchPanel.Reactivate(), DispatcherPriority.Input);
+    }
+
+    /// <summary>F3 / Shift+F3 — repeat the last search even with the bar closed.</summary>
+    private void FindAgain(bool reverse)
+    {
+        if (Editor.Visibility != Visibility.Visible || _searchPanel is null)
+            return;
+        if (string.IsNullOrEmpty(_searchPanel.SearchPattern))
+            return;
+        // Close() clears the result set and DoSearch is a no-op while IsClosed,
+        // so we have to reopen the panel to repopulate matches before navigating.
+        // Focus stays on the editor (we deliberately don't Reactivate).
+        if (_searchPanel.IsClosed)
+            _searchPanel.Open();
+        if (reverse) _searchPanel.FindPrevious();
+        else _searchPanel.FindNext();
     }
 
     private void OnReplace(object sender, RoutedEventArgs e)
@@ -1650,6 +1756,8 @@ public partial class MainWindow : Window
                 OnReplace(sender, e); e.Handled = true; break;
             case Key.F when ctrl:
                 OnFind(sender, e); e.Handled = true; break;
+            case Key.F3:
+                FindAgain(reverse: shift); e.Handled = true; break;
             case Key.Tab when ctrl:
                 CycleTab(shift ? -1 : 1); e.Handled = true; break;
             case Key.M when ctrl:
@@ -1699,6 +1807,7 @@ public partial class MainWindow : Window
         new("Ctrl+Tab", "Next / previous tab"),
         new("Ctrl+1…9", "Jump to tab 1–9"),
         new("Ctrl+F", "Find  ·  Ctrl+H  replace"),
+        new("F3", "Find next  ·  Shift+F3  find previous"),
         new("Ctrl+M", "Cycle markdown mode"),
         new("Ctrl+T", "Focus the file tree"),
         new("Ctrl+Shift+W", "Switch workspace"),
