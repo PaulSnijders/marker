@@ -15,7 +15,14 @@ public partial class PromptDialog : Window
     /// Shows the prompt modally. Returns the entered text, or <c>null</c> if
     /// the user cancelled or left the box empty.
     /// </summary>
-    public static string? Show(Window owner, string title, string message, string initial = "")
+    /// <param name="selectAll">
+    /// When true, selects the whole initial text (handy when the caller wants
+    /// the user to grab a copy of it). Otherwise selects only the name portion
+    /// before the last dot — the typical "edit the name, keep the extension"
+    /// behaviour for a rename.
+    /// </param>
+    public static string? Show(Window owner, string title, string message,
+                               string initial = "", bool selectAll = false)
     {
         var dialog = new PromptDialog
         {
@@ -25,15 +32,14 @@ public partial class PromptDialog : Window
         dialog.MessageText.Text = message;
         dialog.InputBox.Text = initial;
 
-        // Match the OS title bar to the current theme.
-        dialog.SourceInitialized += (_, _) => ThemeManager.ApplyTitleBar(dialog);
+        // Theme the OS title bar and suppress the first-paint flash.
+        ThemeManager.PrepareDialog(dialog);
 
         dialog.Loaded += (_, _) =>
         {
             dialog.InputBox.Focus();
-            // Pre-select the name portion so a rename can overwrite quickly.
             int dot = initial.LastIndexOf('.');
-            if (dot > 0)
+            if (!selectAll && dot > 0)
                 dialog.InputBox.Select(0, dot);
             else
                 dialog.InputBox.SelectAll();

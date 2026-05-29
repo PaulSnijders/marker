@@ -1468,20 +1468,31 @@ public partial class MainWindow : Window
 
     private void OnRename(object sender, RoutedEventArgs e)
     {
-        if (_vm.SelectedNode is not { IsPlaceholder: false } node)
-            return;
+        if (_vm.SelectedNode is { IsPlaceholder: false } node)
+            RenamePath(node.Path, node);
+    }
 
-        string? name = PromptDialog.Show(this, "Rename", "New name:", node.Name);
-        if (name is null || name == node.Name)
+    /// <summary>
+    /// Shared rename flow used by the tree context menu and the F2 shortcut.
+    /// Pass the node only when the rename originated from the tree — that's
+    /// what carries the workspace-root information.
+    /// </summary>
+    private void RenamePath(string oldPath, FileSystemNodeViewModel? node = null)
+    {
+        string oldName = Path.GetFileName(oldPath);
+        // selectAll: pre-select the full filename so the user can copy it with
+        // a single Ctrl+C, while typing still replaces everything as before.
+        string? name = PromptDialog.Show(this, "Rename", "New name:", oldName,
+                                         selectAll: true);
+        if (name is null || name == oldName)
             return;
 
         try
         {
-            string oldPath = node.Path;
             string newPath = AppServices.Files.Rename(oldPath, name);
             RebaseOpenTabs(oldPath, newPath);
 
-            if (node.IsWorkspaceRoot)
+            if (node is { IsWorkspaceRoot: true })
             {
                 // The workspace folder list is rebuilt from the tree roots on
                 // save — just move the watcher and rebase the node.
@@ -1497,6 +1508,29 @@ public partial class MainWindow : Window
         {
             MessageBox.Show(this, $"Rename failed:\n\n{ex.Message}", "Marker",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    /// <summary>
+    /// F2 handler. If the file tree owns focus, rename the selected node
+    /// (matches the context menu). Otherwise rename the file behind the
+    /// active editor tab — but never the scratchpad, which has its own
+    /// rename flow under Workspace ▸ Rename.
+    /// </summary>
+    private void RenameCurrentContext()
+    {
+        if (TreeViewMain.IsKeyboardFocusWithin
+            && _vm.SelectedNode is { IsPlaceholder: false } node)
+        {
+            RenamePath(node.Path, node);
+            return;
+        }
+
+        if (_vm.SelectedTab is { } tab
+            && !string.IsNullOrEmpty(tab.FilePath)
+            && !IsScratchpadFile(tab.FilePath))
+        {
+            RenamePath(tab.FilePath);
         }
     }
 
@@ -1756,6 +1790,8 @@ public partial class MainWindow : Window
                 OnReplace(sender, e); e.Handled = true; break;
             case Key.F when ctrl:
                 OnFind(sender, e); e.Handled = true; break;
+            case Key.F2:
+                RenameCurrentContext(); e.Handled = true; break;
             case Key.F3:
                 FindAgain(reverse: shift); e.Handled = true; break;
             case Key.Tab when ctrl:
@@ -1807,6 +1843,7 @@ public partial class MainWindow : Window
         new("Ctrl+Tab", "Next / previous tab"),
         new("Ctrl+1…9", "Jump to tab 1–9"),
         new("Ctrl+F", "Find  ·  Ctrl+H  replace"),
+        new("F2", "Rename current file"),
         new("F3", "Find next  ·  Shift+F3  find previous"),
         new("Ctrl+M", "Cycle markdown mode"),
         new("Ctrl+T", "Focus the file tree"),

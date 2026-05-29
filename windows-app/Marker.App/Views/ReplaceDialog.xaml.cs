@@ -16,8 +16,8 @@ public partial class ReplaceDialog : Window
     {
         InitializeComponent();
         _editorAccessor = editorAccessor;
-        // Match the OS title bar to the current theme.
-        SourceInitialized += (_, _) => ThemeManager.ApplyTitleBar(this);
+        // Theme the OS title bar and suppress the first-paint flash.
+        ThemeManager.PrepareDialog(this);
         Loaded += (_, _) => FindBox.Focus();
     }
 

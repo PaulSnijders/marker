@@ -40,7 +40,7 @@
             <MenuItem Header="New File…"  Click="OnNewFile" />
             <MenuItem Header="New Folder…" Click="OnNewFolder" />
             <Separator />
-            <MenuItem Header="Rename…" Click="OnRename" />
+            <MenuItem Header="Rename…" InputGestureText="F2" Click="OnRename" />
             <MenuItem Header="Delete" Click="OnDelete" />
             <Separator />
             <MenuItem Header="Reveal in Explorer" Click="OnRevealInExplorer" />
