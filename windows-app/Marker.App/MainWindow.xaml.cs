@@ -49,6 +49,7 @@ public partial class MainWindow : Window
     private bool _suppressEditorFocus;           // skip auto-focusing the editor once
 
     private ICSharpCode.AvalonEdit.Search.SearchPanel? _searchPanel; // installed once; keeps SearchPattern across Close/Open
+    private string _lastWebFindTerm = "";        // last term used in the WebView2 find bar — keeps F3 working after the bar closes
 
     private string ReadFilePath => Path.Combine(AppServices.WebRoot, "__read.html");
 
@@ -1666,8 +1667,14 @@ public partial class MainWindow : Window
         if (Editor.CanRedo) Editor.Redo();
     }
 
-    private void OnFind(object sender, RoutedEventArgs e)
+    private async void OnFind(object sender, RoutedEventArgs e)
     {
+        // Rich / Read modes render in WebView2 — use its built-in find bar there.
+        if (Web.Visibility == Visibility.Visible)
+        {
+            await OpenWebFindAsync();
+            return;
+        }
         if (Editor.Visibility != Visibility.Visible || _searchPanel is null)
             return;
         _searchPanel.Open();
@@ -1675,12 +1682,32 @@ public partial class MainWindow : Window
         // Reactivate's SelectAll lets the user either retype or just hit Enter.
         if (!string.IsNullOrEmpty(Editor.SelectedText))
             _searchPanel.SearchPattern = Editor.SelectedText;
-        Dispatcher.BeginInvoke(() => _searchPanel.Reactivate(), DispatcherPriority.Input);
+        _ = Dispatcher.BeginInvoke(() => _searchPanel.Reactivate(), DispatcherPriority.Input);
     }
 
     /// <summary>F3 / Shift+F3 — repeat the last search even with the bar closed.</summary>
-    private void FindAgain(bool reverse)
+    private async void FindAgain(bool reverse)
     {
+        if (Web.Visibility == Visibility.Visible)
+        {
+            if (!_webReady || Web.CoreWebView2 is null) return;
+            if (string.IsNullOrEmpty(_lastWebFindTerm))
+            {
+                await OpenWebFindAsync();
+                return;
+            }
+            try
+            {
+                if (reverse) Web.CoreWebView2.Find.FindPrevious();
+                else Web.CoreWebView2.Find.FindNext();
+            }
+            catch
+            {
+                // No active session (navigation reset it) — reopen the bar with the last term.
+                await OpenWebFindAsync();
+            }
+            return;
+        }
         if (Editor.Visibility != Visibility.Visible || _searchPanel is null)
             return;
         if (string.IsNullOrEmpty(_searchPanel.SearchPattern))
@@ -1692,6 +1719,39 @@ public partial class MainWindow : Window
             _searchPanel.Open();
         if (reverse) _searchPanel.FindPrevious();
         else _searchPanel.FindNext();
+    }
+
+    /// <summary>
+    /// Opens the WebView2 built-in find bar — same UX as Edge's Ctrl+F. Seeds
+    /// the term from the page selection, falling back to the last used term.
+    /// </summary>
+    private async Task OpenWebFindAsync()
+    {
+        if (!_webReady || Web.CoreWebView2 is null) return;
+        string selection = await GetWebSelectionAsync();
+        string term = !string.IsNullOrEmpty(selection) ? selection : _lastWebFindTerm;
+        // CoreWebView2Find.StartAsync requires a non-empty term to show the bar.
+        // A single space is a benign seed — the user immediately overtypes it.
+        if (string.IsNullOrEmpty(term)) term = " ";
+        var opts = Web.CoreWebView2.Environment.CreateFindOptions();
+        opts.FindTerm = term;
+        opts.ShouldHighlightAllMatches = true;
+        opts.SuppressDefaultFindDialog = false;
+        _lastWebFindTerm = term;
+        try { await Web.CoreWebView2.Find.StartAsync(opts); }
+        catch { /* Bar was already open, or navigation in flight — ignore. */ }
+    }
+
+    private async Task<string> GetWebSelectionAsync()
+    {
+        if (Web.CoreWebView2 is null) return "";
+        try
+        {
+            string json = await Web.CoreWebView2.ExecuteScriptAsync(
+                "(window.getSelection && window.getSelection().toString()) || ''");
+            return JsonSerializer.Deserialize<string>(json) ?? "";
+        }
+        catch { return ""; }
     }
 
     private void OnReplace(object sender, RoutedEventArgs e)

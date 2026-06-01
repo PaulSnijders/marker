@@ -11,7 +11,8 @@
         Background="{DynamicResource AppBackground}"
         Foreground="{DynamicResource AppForeground}"
         UseLayoutRounding="True"
-        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextFormattingMode="Ideal"
+        TextOptions.TextRenderingMode="ClearType"
         AllowDrop="True"
         PreviewDragOver="OnWindowDragOver"
         PreviewDrop="OnWindowDrop">
@@ -52,7 +53,7 @@
             <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
             <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
             <Setter Property="ContextMenu" Value="{StaticResource NodeMenu}" />
-            <Setter Property="Padding" Value="2,0" />
+            <Setter Property="Padding" Value="4,3" />
             <Setter Property="AllowDrop" Value="True" />
             <EventSetter Event="PreviewMouseRightButtonDown" Handler="OnTreeItemRightClick" />
             <EventSetter Event="MouseLeftButtonUp" Handler="OnTreeItemClick" />
@@ -193,6 +194,8 @@
 
         <!-- ===== Status bar ===== -->
         <Border DockPanel.Dock="Bottom" Background="{DynamicResource StatusBarBackground}"
+                BorderBrush="{DynamicResource BorderBrushColor}"
+                BorderThickness="0,1,0,0"
                 Height="24">
             <DockPanel LastChildFill="False">
                 <TextBlock DockPanel.Dock="Left" Style="{StaticResource StatusText}"
@@ -310,7 +313,7 @@
                                            ShowLineNumbers="True"
                                            Background="{DynamicResource EditorBackground}"
                                            Foreground="{DynamicResource AppForeground}"
-                                           Padding="6,4" />
+                                           Padding="20,12" />
                     <wv2:WebView2 x:Name="Web" Visibility="Collapsed" />
                     <Border x:Name="BinaryNotice" Visibility="Collapsed"
                             Background="{DynamicResource EditorBackground}">

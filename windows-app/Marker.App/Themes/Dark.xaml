@@ -13,8 +13,8 @@
     <Color x:Key="C_Selected">#FF37446B</Color>
     <Color x:Key="C_TabBar">#FF2D2D2D</Color>
     <Color x:Key="C_TabActive">#FF1E1E1E</Color>
-    <Color x:Key="C_StatusBar">#FF0E639C</Color>
-    <Color x:Key="C_StatusText">#FFFFFFFF</Color>
+    <Color x:Key="C_StatusBar">#FF252526</Color>
+    <Color x:Key="C_StatusText">#FF9A9A9A</Color>
 
     <SolidColorBrush x:Key="AppBackground"      Color="{StaticResource C_Window}" />
     <SolidColorBrush x:Key="PanelBackground"    Color="{StaticResource C_Panel}" />

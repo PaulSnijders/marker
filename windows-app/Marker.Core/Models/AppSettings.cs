@@ -27,7 +27,7 @@ public sealed class AppSettings
     // --- Editor -------------------------------------------------------
     public bool AutoSave { get; set; } = true;
     public bool WordWrap { get; set; } = false;
-    public string FontFamily { get; set; } = "Cascadia Mono";
+    public string FontFamily { get; set; } = "Cascadia Code";
     public double FontSize { get; set; } = 15;
 
     /// <summary>"light" or "dark".</summary>
