@@ -11,9 +11,6 @@ namespace Marker.Core.FileSystem;
 /// </summary>
 public sealed class LocalFileRepository : IFileRepository
 {
-    // How many leading bytes to scan when guessing binary vs. text.
-    private const int SniffLength = 8192;
-
     public bool DirectoryExists(string path) => Directory.Exists(path);
 
     public bool FileExists(string path) => File.Exists(path);
@@ -36,7 +33,7 @@ public sealed class LocalFileRepository : IFileRepository
     {
         byte[] bytes = File.ReadAllBytes(path);
 
-        if (LooksBinary(bytes))
+        if (BinarySniff.LooksBinary(bytes))
         {
             return new TextFileContent { IsBinary = true };
         }
@@ -112,18 +109,6 @@ public sealed class LocalFileRepository : IFileRepository
     }
 
     // --- helpers ------------------------------------------------------
-
-    /// <summary>A NUL byte in the sniff window is a strong binary signal.</summary>
-    private static bool LooksBinary(byte[] bytes)
-    {
-        int limit = Math.Min(bytes.Length, SniffLength);
-        for (int i = 0; i < limit; i++)
-        {
-            if (bytes[i] == 0)
-                return true;
-        }
-        return false;
-    }
 
     private static Encoding DetectEncoding(byte[] bytes, out bool hasBom)
     {

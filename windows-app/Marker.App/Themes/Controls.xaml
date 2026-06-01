@@ -506,6 +506,70 @@
         </Setter>
     </Style>
 
+    <!-- ============================ TabControl =========================== -->
+    <!-- Flat tabs used by the sidebar (Tree / Find). Header strip sits on
+         top of the tab content, with a 1-pixel underline matching the rest of
+         the chrome. The selected tab gets the accent colour as a top stripe. -->
+
+    <Style TargetType="TabItem">
+        <Setter Property="Foreground" Value="{DynamicResource MutedForeground}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TabItem">
+                    <Border x:Name="Bd" Padding="12,5" Background="{TemplateBinding Background}">
+                        <Border x:Name="Underline" BorderBrush="Transparent"
+                                BorderThickness="0,0,0,2">
+                            <ContentPresenter ContentSource="Header"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True" />
+                        </Border>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{DynamicResource HoverBackground}" />
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource AppForeground}" />
+                            <Setter TargetName="Underline" Property="BorderBrush"
+                                    Value="{DynamicResource AccentBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="TabControl">
+        <Setter Property="Background" Value="{DynamicResource PanelBackground}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TabControl">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Border Grid.Row="0" BorderThickness="0,0,0,1"
+                                BorderBrush="{DynamicResource BorderBrushColor}">
+                            <TabPanel x:Name="HeaderPanel" Panel.ZIndex="1"
+                                      IsItemsHost="True"
+                                      Background="Transparent" />
+                        </Border>
+                        <Border Grid.Row="1" Background="{TemplateBinding Background}">
+                            <ContentPresenter ContentSource="SelectedContent" />
+                        </Border>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- ============================ SearchPanel ========================== -->
     <!-- AvalonEdit's Ctrl+F find bar. Its built-in template uses raw system
          colours, so it looks wrong in dark mode — retemplate it to follow the

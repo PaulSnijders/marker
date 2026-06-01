@@ -40,6 +40,7 @@ public partial class MainWindow : Window
     private bool _webAvailable = true;           // false if WebView2 runtime missing
     private bool _startupComplete;               // true once the window finished loading
     private ReplaceDialog? _replaceDialog;
+    private bool _checkingExternalChange;          // re-entry guard for the disk-change prompt
 
     private Workspace? _activeWorkspace;         // the workspace currently shown
     private bool _switchingWorkspace;            // true while swapping workspaces
@@ -50,6 +51,9 @@ public partial class MainWindow : Window
 
     private ICSharpCode.AvalonEdit.Search.SearchPanel? _searchPanel; // installed once; keeps SearchPattern across Close/Open
     private string _lastWebFindTerm = "";        // last term used in the WebView2 find bar — keeps F3 working after the bar closes
+
+    private FindInFilesViewModel? _findVm;       // backing VM for the sidebar Find tab
+    private ReplaceInFilesViewModel? _replaceVm; // backing VM for the sidebar Replace tab
 
     private string ReadFilePath => Path.Combine(AppServices.WebRoot, "__read.html");
 
@@ -72,6 +76,7 @@ public partial class MainWindow : Window
 
         Loaded += OnLoaded;
         Closing += OnWindowClosing;
+        Activated += (_, _) => CheckCurrentFileForExternalChanges();
         Deactivated += (_, _) =>
         {
             if (AppServices.Settings.AutoSave) SaveAllDirty(silent: true);
@@ -127,9 +132,60 @@ public partial class MainWindow : Window
 
         InitializeWorkspaces();
         RebuildRecentMenu();
+        InitializeFindInFiles();
 
         // From here on, every settings change is written through immediately.
         _startupComplete = true;
+    }
+
+    /// <summary>
+    /// Wires the sidebar's Find and Replace tabs to fresh VMs that search the
+    /// active workspace's roots, and routes match clicks back into
+    /// <see cref="OpenFile"/>. The roots accessor is a lambda so a workspace
+    /// switch transparently rebinds both tabs to the new folder set.
+    /// </summary>
+    private void InitializeFindInFiles()
+    {
+        Func<IReadOnlyList<string>> roots =
+            () => _vm.RootFolders.Select(n => n.Path).ToList();
+
+        _findVm = new FindInFilesViewModel(roots);
+        FindInFiles.Attach(_findVm);
+        FindInFiles.MatchActivated += OnFindMatchActivated;
+
+        _replaceVm = new ReplaceInFilesViewModel(roots);
+        ReplaceInFiles.Attach(_replaceVm);
+        ReplaceInFiles.MatchActivated += OnFindMatchActivated;
+        ReplaceInFiles.FilesReplaced += OnReplaceFilesReplaced;
+    }
+
+    /// <summary>
+    /// Refreshes any open tab whose file was just rewritten by a Replace All.
+    /// Without this, the editor would still show pre-replace text while disk
+    /// is already updated — and the next save would clobber the changes.
+    /// </summary>
+    private void OnReplaceFilesReplaced(object? sender, FilesReplacedEventArgs e)
+    {
+        foreach (string path in e.FilePaths)
+        {
+            var tab = _vm.Tabs.FirstOrDefault(
+                t => string.Equals(t.FilePath, path, StringComparison.OrdinalIgnoreCase));
+            if (tab is null || tab.IsBinary)
+                continue;
+            try
+            {
+                var fresh = AppServices.Files.ReadText(path);
+                if (fresh.IsBinary)
+                    continue;
+                tab.Document.Text = fresh.Text;
+                tab.IsDirty = false;
+                CaptureDiskStamp(tab);
+            }
+            catch
+            {
+                // Tab will be stale until manually closed/reopened — non-fatal.
+            }
+        }
     }
 
     private void RestoreWindowBounds()
@@ -847,6 +903,7 @@ public partial class MainWindow : Window
     {
         _watchTimer.Stop();
         RefreshTree();
+        CheckCurrentFileForExternalChanges();
     }
 
     // ================================================================
@@ -888,6 +945,7 @@ public partial class MainWindow : Window
                 tab.Title = "Scratchpad";   // friendly name, not the keyed file name
             else if (IsHelpFile(path))
                 tab.Title = "Help";
+            CaptureDiskStamp(tab);
             tab.PropertyChanged += OnTabPropertyChanged;
             _vm.Tabs.Add(tab);
 
@@ -1108,6 +1166,7 @@ public partial class MainWindow : Window
             SaveTab(leaving);
         }
         ApplyTab();
+        CheckCurrentFileForExternalChanges();
     }
 
     private void OnTabPreviewMouseDown(object sender, MouseButtonEventArgs e)
@@ -1402,6 +1461,7 @@ public partial class MainWindow : Window
         {
             AppServices.Files.WriteText(tab.FilePath, tab.ToContent());
             tab.IsDirty = false;
+            CaptureDiskStamp(tab);   // our own write is not an external change
             if (tab == _vm.SelectedTab)
                 UpdateTitle();
         }
@@ -1410,6 +1470,121 @@ public partial class MainWindow : Window
             if (!silent)
                 MessageBox.Show(this, $"Could not save {tab.Title}:\n\n{ex.Message}",
                     "Marker", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    /// <summary>
+    /// Records the file's current LastWriteTime + size on the tab so a later
+    /// external edit can be told apart from one we made ourselves.
+    /// </summary>
+    private static void CaptureDiskStamp(EditorTabViewModel tab)
+    {
+        try
+        {
+            var info = new FileInfo(tab.FilePath);
+            if (!info.Exists)
+                return;
+            tab.DiskTimestampUtc = info.LastWriteTimeUtc;
+            tab.DiskSize = info.Length;
+        }
+        catch
+        {
+            // A stat failure just means we'll re-check on the next tick.
+        }
+    }
+
+    /// <summary>
+    /// Reacts to the active tab's file being modified outside Marker. A clean
+    /// tab is silently reloaded; a dirty tab prompts the user before its
+    /// in-editor changes are thrown away. Only the currently selected tab is
+    /// checked — other open tabs catch up when they become the active one.
+    /// </summary>
+    private void CheckCurrentFileForExternalChanges()
+    {
+        if (_checkingExternalChange) return;
+        if (_vm.SelectedTab is not { } tab) return;
+        if (tab.IsBinary || string.IsNullOrEmpty(tab.FilePath)) return;
+
+        FileInfo info;
+        try
+        {
+            info = new FileInfo(tab.FilePath);
+            if (!info.Exists) return;   // deletion is out of scope for this check
+        }
+        catch { return; }
+
+        if (info.LastWriteTimeUtc == tab.DiskTimestampUtc && info.Length == tab.DiskSize)
+            return;   // matches what we last loaded/wrote — nothing changed
+
+        _checkingExternalChange = true;
+        try
+        {
+            if (!tab.IsDirty)
+            {
+                ReloadTabFromDisk(tab);
+                return;
+            }
+
+            var answer = MessageBox.Show(this,
+                $"{tab.Title} has been modified outside Marker, " +
+                "but you have unsaved changes here.\n\n" +
+                "Reload from disk and discard your changes?",
+                "File changed on disk",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning);
+
+            if (answer == MessageBoxResult.Yes)
+            {
+                ReloadTabFromDisk(tab);
+            }
+            else
+            {
+                // User chose to keep their in-editor version. Remember the
+                // new disk stamp so we don't keep nagging about the same edit.
+                tab.DiskTimestampUtc = info.LastWriteTimeUtc;
+                tab.DiskSize = info.Length;
+            }
+        }
+        finally
+        {
+            _checkingExternalChange = false;
+        }
+    }
+
+    /// <summary>
+    /// Reloads the tab from disk, preserving caret + scroll when the editor
+    /// is the visible host, and re-rendering the rich/read view when the
+    /// WebView2 is currently driving the tab.
+    /// </summary>
+    private void ReloadTabFromDisk(EditorTabViewModel tab)
+    {
+        Marker.Core.FileSystem.TextFileContent fresh;
+        try { fresh = AppServices.Files.ReadText(tab.FilePath); }
+        catch { return; }
+        if (fresh.IsBinary) return;
+
+        bool editorVisible = Editor.Visibility == Visibility.Visible
+                             && ReferenceEquals(Editor.Document, tab.Document);
+        int caret = editorVisible ? Editor.CaretOffset : 0;
+        double vOff = editorVisible ? Editor.VerticalOffset : 0;
+        double hOff = editorVisible ? Editor.HorizontalOffset : 0;
+
+        tab.ReloadFrom(fresh);
+        CaptureDiskStamp(tab);
+
+        if (editorVisible)
+        {
+            Editor.CaretOffset = Math.Min(caret, Editor.Document.TextLength);
+            Editor.ScrollToVerticalOffset(vOff);
+            Editor.ScrollToHorizontalOffset(hOff);
+        }
+
+        // Refresh the rendered side too when the tab is driving the WebView.
+        if (ReferenceEquals(tab, _webTab))
+        {
+            if (_webMode == MarkdownMode.Rich)
+                PushMarkdownToEditor(tab.Document.Text);
+            else
+                NavigateRead(tab);
         }
     }
 
@@ -1765,6 +1940,79 @@ public partial class MainWindow : Window
         _replaceDialog.Activate();
     }
 
+    /// <summary>
+    /// Ctrl+Shift+F — flip the sidebar to the Find tab and put the cursor in
+    /// the search box. Pre-seeds the query with the editor selection so the
+    /// common "look this up across the project" flow is one keystroke.
+    /// </summary>
+    private void OpenFindInFiles()
+    {
+        if (_findVm is null)
+            return;
+        SeedSidebarQuery(s => _findVm.SearchText = s);
+        SidebarTabs.SelectedIndex = 1;
+        Dispatcher.BeginInvoke(() => FindInFiles.FocusSearchBox(), DispatcherPriority.Input);
+    }
+
+    /// <summary>Ctrl+Shift+R — flip the sidebar to the Replace tab; same seeding as Find.</summary>
+    private void OpenReplaceInFiles()
+    {
+        if (_replaceVm is null)
+            return;
+        SeedSidebarQuery(s => _replaceVm.SearchText = s);
+        SidebarTabs.SelectedIndex = 2;
+        Dispatcher.BeginInvoke(() => ReplaceInFiles.FocusSearchBox(), DispatcherPriority.Input);
+    }
+
+    /// <summary>Ctrl+Shift+T — flip the sidebar back to the Tree tab and focus the tree.</summary>
+    private void OpenTreeTab()
+    {
+        SidebarTabs.SelectedIndex = 0;
+        Dispatcher.BeginInvoke(() => FocusTree(), DispatcherPriority.Input);
+    }
+
+    /// <summary>
+    /// Seeds the sidebar query with the editor's current selection when it's
+    /// a single-line one. Shared by Find and Replace so the two tabs feel
+    /// symmetric from the keyboard.
+    /// </summary>
+    private void SeedSidebarQuery(Action<string> setter)
+    {
+        if (Editor.Visibility != Visibility.Visible || Editor.SelectionLength == 0)
+            return;
+        string sel = Editor.SelectedText;
+        if (!sel.Contains('\n'))
+            setter(sel);
+    }
+
+    /// <summary>
+    /// A row in the Find results was activated. Open the file (or focus the
+    /// existing tab) and put the caret on the match in the source editor.
+    /// Rich/Read modes are nudged back to Source so the jump lands somewhere
+    /// the user can actually see.
+    /// </summary>
+    private void OnFindMatchActivated(object? sender, MatchActivatedEventArgs e)
+    {
+        OpenFile(e.FilePath);
+
+        if (_vm.SelectedTab is { IsMarkdown: true, Mode: not MarkdownMode.Source })
+            SetMode(MarkdownMode.Source);
+
+        if (Editor.Visibility != Visibility.Visible || Editor.Document is null)
+            return;
+
+        int lineNumber = Math.Clamp(e.LineNumber, 1, Math.Max(1, Editor.Document.LineCount));
+        var line = Editor.Document.GetLineByNumber(lineNumber);
+        int caret = line.Offset + Math.Clamp(e.ColumnStart, 0, line.Length);
+        int length = Math.Min(e.Length, line.EndOffset - caret);
+
+        Editor.CaretOffset = caret;
+        if (length > 0)
+            Editor.Select(caret, length);
+        Editor.ScrollToLine(lineNumber);
+        Dispatcher.BeginInvoke(() => Editor.TextArea.Focus(), DispatcherPriority.Input);
+    }
+
     private void OnToggleWordWrap(object sender, RoutedEventArgs e)
     {
         bool wrap = WordWrapItem.IsChecked;
@@ -1848,8 +2096,14 @@ public partial class MainWindow : Window
                 OnCloseTab(sender, e); e.Handled = true; break;
             case Key.H when ctrl:
                 OnReplace(sender, e); e.Handled = true; break;
+            case Key.F when ctrl && shift:
+                OpenFindInFiles(); e.Handled = true; break;
             case Key.F when ctrl:
                 OnFind(sender, e); e.Handled = true; break;
+            case Key.R when ctrl && shift:
+                OpenReplaceInFiles(); e.Handled = true; break;
+            case Key.T when ctrl && shift:
+                OpenTreeTab(); e.Handled = true; break;
             case Key.F2:
                 RenameCurrentContext(); e.Handled = true; break;
             case Key.F3:
@@ -1903,6 +2157,9 @@ public partial class MainWindow : Window
         new("Ctrl+Tab", "Next / previous tab"),
         new("Ctrl+1…9", "Jump to tab 1–9"),
         new("Ctrl+F", "Find  ·  Ctrl+H  replace"),
+        new("Ctrl+Shift+F", "Find in files"),
+        new("Ctrl+Shift+R", "Replace in files  ·  Ctrl+Enter to commit"),
+        new("Ctrl+Shift+T", "Show the file tree"),
         new("F2", "Rename current file"),
         new("F3", "Find next  ·  Shift+F3  find previous"),
         new("Ctrl+M", "Cycle markdown mode"),

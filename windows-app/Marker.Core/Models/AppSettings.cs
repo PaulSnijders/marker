@@ -36,6 +36,14 @@ public sealed class AppSettings
     // --- File tree ----------------------------------------------------
     public List<string> IgnorePatterns { get; set; } = new() { ".git", "node_modules", "bin", "obj" };
 
+    // --- Find in files -----------------------------------------------
+    // Toggle state of the three options in the workspace-wide find panel.
+    // Remembered across sessions so the user doesn't have to flip them each
+    // time. The search text itself is not persisted.
+    public bool FindMatchCase { get; set; }
+    public bool FindWholeWord { get; set; }
+    public bool FindUseRegex { get; set; }
+
     // --- Recent / session --------------------------------------------
     public List<string> RecentFiles { get; set; } = new();
 

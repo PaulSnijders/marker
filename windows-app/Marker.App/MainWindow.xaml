@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:Marker.App"
         xmlns:vm="clr-namespace:Marker.App.ViewModels"
+        xmlns:views="clr-namespace:Marker.App.Views"
         xmlns:avalonedit="http://icsharpcode.net/sharpdevelop/avalonedit"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="Marker"
@@ -249,22 +250,35 @@
                                   ToolTip="Switch workspace" />
                     </DockPanel>
 
-                    <TreeView Grid.Row="1" x:Name="TreeViewMain"
-                              ItemsSource="{Binding RootFolders}"
-                              Background="Transparent" BorderThickness="0"
-                              Foreground="{DynamicResource AppForeground}"
-                              AllowDrop="True"
-                              SelectedItemChanged="OnTreeSelectionChanged"
-                              PreviewKeyDown="OnTreeKeyDown"
-                              VirtualizingStackPanel.IsVirtualizing="True"
-                              VirtualizingStackPanel.VirtualizationMode="Recycling" />
-                    <TextBlock Grid.Row="1"
-                               Text="No folders in this workspace.&#x0a;Drag a folder here, or use Workspace ▸ Add Folder…"
-                               Foreground="{DynamicResource MutedForeground}"
-                               TextAlignment="Center" Margin="12"
-                               VerticalAlignment="Top" HorizontalAlignment="Center"
-                               TextWrapping="Wrap"
-                               x:Name="TreeEmptyHint" />
+                    <!-- Sidebar tabs: the file tree and workspace-wide find,
+                         sharing the workspace dropdown above as their scope. -->
+                    <TabControl Grid.Row="1" x:Name="SidebarTabs">
+                        <TabItem Header="Tree">
+                            <Grid>
+                                <TreeView x:Name="TreeViewMain"
+                                          ItemsSource="{Binding RootFolders}"
+                                          Background="Transparent" BorderThickness="0"
+                                          Foreground="{DynamicResource AppForeground}"
+                                          AllowDrop="True"
+                                          SelectedItemChanged="OnTreeSelectionChanged"
+                                          PreviewKeyDown="OnTreeKeyDown"
+                                          VirtualizingStackPanel.IsVirtualizing="True"
+                                          VirtualizingStackPanel.VirtualizationMode="Recycling" />
+                                <TextBlock x:Name="TreeEmptyHint"
+                                           Text="No folders in this workspace.&#x0a;Drag a folder here, or use Workspace ▸ Add Folder…"
+                                           Foreground="{DynamicResource MutedForeground}"
+                                           TextAlignment="Center" Margin="12"
+                                           VerticalAlignment="Top" HorizontalAlignment="Center"
+                                           TextWrapping="Wrap" />
+                            </Grid>
+                        </TabItem>
+                        <TabItem Header="Find">
+                            <views:FindInFilesView x:Name="FindInFiles" />
+                        </TabItem>
+                        <TabItem Header="Replace">
+                            <views:ReplaceInFilesView x:Name="ReplaceInFiles" />
+                        </TabItem>
+                    </TabControl>
                 </Grid>
             </Border>
 

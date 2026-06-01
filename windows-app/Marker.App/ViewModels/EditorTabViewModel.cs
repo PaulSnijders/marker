@@ -12,12 +12,25 @@ namespace Marker.App.ViewModels;
 /// </summary>
 public sealed partial class EditorTabViewModel : ObservableObject
 {
-    private readonly TextFileContent _origin;
+    private TextFileContent _origin;
 
     [ObservableProperty] private string _filePath;
     [ObservableProperty] private string _title;
     [ObservableProperty] private bool _isDirty;
     [ObservableProperty] private MarkdownMode _mode;
+
+    /// <summary>
+    /// Disk LastWriteTime (UTC) the last time we read or wrote this file —
+    /// used to spot external edits when the window is reactivated.
+    /// </summary>
+    public DateTime DiskTimestampUtc { get; set; }
+
+    /// <summary>
+    /// Disk size at the same moment as <see cref="DiskTimestampUtc"/> — a
+    /// second axis so quick saves with a 1-second-resolution clock still
+    /// register as a change.
+    /// </summary>
+    public long DiskSize { get; set; }
 
     /// <summary>
     /// True for a transient "sneak-peek" tab opened with the right-arrow in the
@@ -72,5 +85,18 @@ public sealed partial class EditorTabViewModel : ObservableObject
     {
         FilePath = newPath;
         Title = Path.GetFileName(newPath);
+    }
+
+    /// <summary>
+    /// Replaces the document contents with a freshly-read disk snapshot. The
+    /// origin (encoding, line endings) is swapped too so the next save uses
+    /// whatever the file looks like now. <see cref="IsDirty"/> is cleared
+    /// after the TextChanged handler has flipped it true.
+    /// </summary>
+    public void ReloadFrom(TextFileContent fresh)
+    {
+        _origin = fresh;
+        Document.Text = fresh.Text;
+        IsDirty = false;
     }
 }
