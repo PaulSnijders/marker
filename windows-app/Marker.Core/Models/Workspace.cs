@@ -20,6 +20,14 @@ public sealed class Workspace
     public List<string> OpenFiles { get; set; } = new();
 
     /// <summary>
+    /// Absolute paths of every directory that was expanded in the tree when
+    /// this workspace was last active, so the tree restores to the same
+    /// open/closed shape on the next visit. Empty for a brand-new workspace —
+    /// in which case roots default to expanded and children to collapsed.
+    /// </summary>
+    public List<string> ExpandedFolders { get; set; } = new();
+
+    /// <summary>
     /// Absolute path of the JSON file this workspace was loaded from / last
     /// saved to. Not serialized; set by the store so a rename can delete the
     /// file under the old name.

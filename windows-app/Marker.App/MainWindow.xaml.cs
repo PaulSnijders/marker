@@ -340,6 +340,7 @@ public partial class MainWindow : Window
         Web.CoreWebView2.Settings.IsStatusBarEnabled = false;
         Web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
         Web.WebMessageReceived += OnWebMessageReceived;
+        Web.CoreWebView2.NavigationStarting += OnWebNavigationStarting;
         _webReady = true;
     }
 
@@ -485,15 +486,84 @@ public partial class MainWindow : Window
         _vm.ActiveWorkspace = ws;
         _suppressWorkspaceSelection = false;
 
+        // Saved set is authoritative when non-empty. Empty means we've never
+        // persisted state for this workspace (new, or pre-feature) — fall back
+        // to the original "roots expanded, children collapsed" defaults.
+        var expanded = new HashSet<string>(ws.ExpandedFolders, StringComparer.OrdinalIgnoreCase);
+        bool hasSavedState = expanded.Count > 0;
+
         foreach (string folder in ws.Folders.ToList())
         {
             if (Directory.Exists(folder))
-                AddFolderNode(folder);
+                AddFolderNode(folder, expanded: !hasSavedState || expanded.Contains(folder));
         }
+
+        RestoreExpandedDescendants(expanded);
 
         UpdateTreeHint();
         ReopenFiles(ws);
         ApplyTab();
+    }
+
+    /// <summary>
+    /// Re-expands every saved descendant directory under the workspace roots so
+    /// the tree opens to the same shape the user left it in. Walks paths
+    /// shortest-first so a parent is expanded (and its children lazy-loaded)
+    /// before we look up anything underneath it.
+    /// </summary>
+    private void RestoreExpandedDescendants(HashSet<string> expandedPaths)
+    {
+        foreach (string path in expandedPaths.OrderBy(p => p.Length))
+        {
+            var node = FindTreeNode(path);
+            if (node is { IsDirectory: true })
+                node.IsExpanded = true;
+        }
+    }
+
+    /// <summary>Locates the tree node for an absolute path, or null if not present.</summary>
+    private FileSystemNodeViewModel? FindTreeNode(string path)
+    {
+        foreach (var root in _vm.RootFolders)
+        {
+            if (PathsEqual(root.Path, path))
+                return root;
+            if (IsUnder(root.Path, path))
+                return FindDescendantNode(root, path);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Descends into <paramref name="parent"/> looking for the node whose path
+    /// is <paramref name="path"/>. Expands each intermediate directory along the
+    /// way so its children load — without that the lazy placeholder would hide
+    /// the real entries we need to walk into.
+    /// </summary>
+    private static FileSystemNodeViewModel? FindDescendantNode(FileSystemNodeViewModel parent, string path)
+    {
+        foreach (var child in parent.Children)
+        {
+            if (child.IsPlaceholder || !child.IsDirectory)
+                continue;
+            if (PathsEqual(child.Path, path))
+                return child;
+            if (IsUnder(child.Path, path))
+            {
+                child.IsExpanded = true;   // triggers LoadChildren if not yet loaded
+                return FindDescendantNode(child, path);
+            }
+        }
+        return null;
+    }
+
+    private static bool PathsEqual(string a, string b)
+        => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsUnder(string parent, string path)
+    {
+        string prefix = parent.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Closes the current workspace and shows another one.</summary>
@@ -530,6 +600,7 @@ public partial class MainWindow : Window
         if (_activeWorkspace is null || _switchingWorkspace)
             return;
         _activeWorkspace.Folders = _vm.RootFolders.Select(n => n.Path).ToList();
+        _activeWorkspace.ExpandedFolders = CollectExpandedFolders();
         // Sneak-peeks are transient and the help document belongs to no
         // workspace — neither should reopen on the next launch.
         _activeWorkspace.OpenFiles = _vm.Tabs
@@ -538,6 +609,29 @@ public partial class MainWindow : Window
             .ToList();
         try { AppServices.SaveWorkspace(_activeWorkspace); }
         catch { /* a workspace write must never interrupt the user */ }
+    }
+
+    /// <summary>
+    /// Snapshots every currently-expanded directory in the tree (roots and
+    /// descendants alike) so the next visit to this workspace can re-open the
+    /// same folders. Lazy, unloaded children naturally drop out since they're
+    /// placeholders.
+    /// </summary>
+    private List<string> CollectExpandedFolders()
+    {
+        var result = new List<string>();
+        foreach (var root in _vm.RootFolders)
+            CollectExpanded(root, result);
+        return result;
+    }
+
+    private static void CollectExpanded(FileSystemNodeViewModel node, List<string> result)
+    {
+        if (!node.IsDirectory || node.IsPlaceholder || !node.IsExpanded)
+            return;
+        result.Add(node.Path);
+        foreach (var child in node.Children)
+            CollectExpanded(child, result);
     }
 
     private void OnWorkspaceSelected(object sender, SelectionChangedEventArgs e)
@@ -655,11 +749,11 @@ public partial class MainWindow : Window
 
     // --- folders within a workspace -----------------------------------
 
-    private void AddFolderNode(string folder)
+    private void AddFolderNode(string folder, bool expanded = true)
     {
         var node = new FileSystemNodeViewModel(folder, isDirectory: true, isWorkspaceRoot: true)
         {
-            IsExpanded = true
+            IsExpanded = expanded
         };
         _vm.RootFolders.Add(node);
         CreateWatcher(folder);
@@ -1064,12 +1158,7 @@ public partial class MainWindow : Window
         if (IsScratchpadFile(path))
             return MarkdownMode.Source;
 
-        var settings = AppServices.Settings;
-        if (settings.RememberModePerFile &&
-            settings.FileModes.TryGetValue(path, out var saved))
-            return saved;
-
-        return settings.DefaultMarkdownMode;
+        return AppServices.Settings.DefaultMarkdownMode;
     }
 
     // --- scratchpad ---------------------------------------------------
@@ -1388,6 +1477,80 @@ public partial class MainWindow : Window
         Web.CoreWebView2.PostWebMessageAsString(payload);
     }
 
+    /// <summary>
+    /// Intercepts link clicks inside the rendered markdown (read mode) and the
+    /// rich editor. Same-host relative links resolve against the current tab's
+    /// folder and open as tabs; external links go to the default browser; a
+    /// missing target raises a themed alert instead of WebView2's stock error.
+    /// </summary>
+    private void OnWebNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
+    {
+        string uri = e.Uri ?? "";
+        if (uri.Length == 0) return;
+
+        // Allow our own page loads (the two HTML hosts we Navigate to) plus
+        // any in-page anchor reloads keyed off the same paths.
+        if (uri.StartsWith("https://marker.assets/__read.html", StringComparison.OrdinalIgnoreCase) ||
+            uri.StartsWith("https://marker.assets/editor.html", StringComparison.OrdinalIgnoreCase) ||
+            uri.StartsWith("about:", StringComparison.OrdinalIgnoreCase) ||
+            uri.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        e.Cancel = true;
+
+        if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed))
+            return;
+
+        // marker.assets is the virtual host serving our read page — any other
+        // path under it is a relative link from the markdown source.
+        if (parsed.Scheme == "https" &&
+            parsed.Host.Equals("marker.assets", StringComparison.OrdinalIgnoreCase))
+        {
+            OpenRelativeLink(parsed);
+            return;
+        }
+
+        if (parsed.IsFile)
+        {
+            OpenLocalPath(parsed.LocalPath);
+            return;
+        }
+
+        // http(s) to other hosts, mailto:, etc. — hand off to the OS handler.
+        try { Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true }); }
+        catch { /* unregistered handler — drop silently */ }
+    }
+
+    private void OpenRelativeLink(Uri parsed)
+    {
+        string relative = Uri.UnescapeDataString(parsed.AbsolutePath).TrimStart('/');
+        if (relative.Length == 0) return;
+
+        string? baseDir = _webTab?.FilePath is { Length: > 0 } src
+            ? Path.GetDirectoryName(src) : null;
+        if (string.IsNullOrEmpty(baseDir))
+        {
+            ShowMissingFileAlert(relative);
+            return;
+        }
+
+        string full;
+        try { full = Path.GetFullPath(Path.Combine(baseDir, relative)); }
+        catch { ShowMissingFileAlert(relative); return; }
+
+        OpenLocalPath(full);
+    }
+
+    private void OpenLocalPath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return;
+        if (!File.Exists(path)) { ShowMissingFileAlert(path); return; }
+        OpenFile(path);
+    }
+
+    private void ShowMissingFileAlert(string path)
+        => ConfirmDialog.Alert(this, "Marker", $"File not found:\n\n{path}");
+
     // ================================================================
     //  Markdown mode switching
     // ================================================================
@@ -1411,16 +1574,16 @@ public partial class MainWindow : Window
 
     private void SetMode(MarkdownMode mode)
     {
-        if (_vm.SelectedTab is not { IsMarkdown: true } tab)
+        if (_vm.SelectedTab is not { IsMarkdown: true })
             return;
 
-        tab.Mode = mode;
+        // One mode app-wide: update every open markdown tab so switching
+        // away and back keeps the chosen view.
+        foreach (var t in _vm.Tabs)
+            if (t.IsMarkdown)
+                t.Mode = mode;
 
-        var settings = AppServices.Settings;
-        if (settings.RememberModePerFile)
-            settings.FileModes[tab.FilePath] = mode;
-        else
-            settings.DefaultMarkdownMode = mode;
+        AppServices.Settings.DefaultMarkdownMode = mode;
 
         ApplyTab();
         SaveSettingsNow();

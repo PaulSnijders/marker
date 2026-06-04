@@ -18,11 +18,10 @@ public sealed class AppSettings
     public List<string> WorkspaceFolders { get; set; } = new();
 
     // --- Markdown -----------------------------------------------------
+    /// <summary>The view mode for all open markdown files. Switching mode on
+    /// one tab updates this and is propagated to every other markdown tab —
+    /// there is only one mode app-wide.</summary>
     public MarkdownMode DefaultMarkdownMode { get; set; } = MarkdownMode.Source;
-
-    /// <summary>When true, each file remembers its last mode in <see cref="FileModes"/>.</summary>
-    public bool RememberModePerFile { get; set; } = true;
-    public Dictionary<string, MarkdownMode> FileModes { get; set; } = new();
 
     // --- Editor -------------------------------------------------------
     public bool AutoSave { get; set; } = true;
