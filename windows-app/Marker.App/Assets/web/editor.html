@@ -3,9 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Relative URLs in the markdown (e.g. images/foo.png from a pasted image)
+       resolve against the current tab's folder via marker.docs. Bundled Toast
+       UI assets stay on marker.assets and so MUST be referenced absolutely. -->
+  <base href="https://marker.docs/" />
+  <link rel="icon" href="data:," />
   <title>Marker — Rich Mode</title>
-  <link rel="stylesheet" href="toastui-editor.min.css" />
-  <link rel="stylesheet" href="toastui-editor-dark.min.css" />
+  <link rel="stylesheet" href="https://marker.assets/toastui-editor.min.css" />
+  <link rel="stylesheet" href="https://marker.assets/toastui-editor-dark.min.css" />
   <style>
     html, body { height: 100%; margin: 0; padding: 0; }
     #editor { height: 100vh; }
@@ -14,15 +19,17 @@
 </head>
 <body>
   <div id="editor"></div>
-  <script src="toastui-editor-all.min.js"></script>
+  <script src="https://marker.assets/toastui-editor-all.min.js"></script>
   <script>
     // ----------------------------------------------------------------
     // Rich (WYSIWYG) markdown editor host.
     //
     // Protocol with the WPF host (window.chrome.webview):
     //   host -> page : { type: 'setMarkdown', markdown }
-    //   page -> host : { type: 'ready' }              (editor created)
-    //   page -> host : { type: 'change', markdown }   (user edited)
+    //   host -> page : { type: 'imageSaved', requestId, path }   (path = null on failure)
+    //   page -> host : { type: 'ready' }                         (editor created)
+    //   page -> host : { type: 'change', markdown }              (user edited)
+    //   page -> host : { type: 'saveImage', requestId, mime, data }
     //
     // 'suppress' guards the change event while the host pushes content in,
     // so loading a document never reports a spurious edit.
@@ -33,8 +40,113 @@
     let editor;
     let suppress = false;
 
+    // Pasted/dropped image hook: each in-flight blob keeps its Toast UI callback
+    // plus the original data URL so we can fall back to base64 if the host can
+    // not save the image to disk (e.g. the tab has never been saved).
+    let imageReqSeq = 0;
+    const imageRequests = {};
+
     function postToHost(message) {
       window.chrome.webview.postMessage(JSON.stringify(message));
+    }
+
+    function handleImageBlob(blob, callback) {
+      const reader = new FileReader();
+      reader.onload = function () {
+        const dataUrl = reader.result; // "data:<mime>;base64,...."
+        const comma = dataUrl.indexOf(',');
+        if (comma < 0) { callback(dataUrl, 'image'); return; }
+
+        const id = ++imageReqSeq;
+        imageRequests[id] = { callback, dataUrl };
+        postToHost({
+          type: 'saveImage',
+          requestId: id,
+          mime: blob.type || 'image/png',
+          data: dataUrl.substring(comma + 1)
+        });
+      };
+      reader.readAsDataURL(blob);
+    }
+
+    // Toast UI's WYSIWYG paste handler bails out of image processing whenever
+    // a 'text/rtf' clipboard item is present, which Windows Snipping Tool and
+    // most browsers always include alongside the bitmap. ProseMirror's default
+    // paste then inserts the HTML form ('<img src="data:…base64,…">') verbatim.
+    //
+    // We catch paste at the document level in capture phase, BEFORE any
+    // ProseMirror listener on the contenteditable, and route any image
+    // payload through our save-to-disk pipeline. Two shapes to handle:
+    //   1) clipboardData.items has a kind='file' image (screenshots).
+    //   2) clipboardData has a text/html form with <img src="data:…">
+    //      and no file item (some apps only put HTML on the clipboard).
+    function installPasteImageHandler() {
+      document.addEventListener('paste', function (e) {
+        const root = document.getElementById('editor');
+        if (!root || !root.contains(e.target)) return;
+
+        const data = e.clipboardData;
+        if (!data) return;
+
+        // If the clipboard mixes images with surrounding text/formatting, let
+        // ProseMirror's default paste run so we keep the text. The host then
+        // sweeps any inline base64 images and rich-text leftovers (e.g. <br>
+        // tags Toast UI emits) out of the resulting markdown — the 'paste'
+        // notification scopes that strip to changes that follow a paste.
+        const plain = data.getData ? (data.getData('text/plain') || '') : '';
+        const html  = data.getData ? (data.getData('text/html')  || '') : '';
+        const htmlText = html.replace(/<img[^>]*>/gi, '').replace(/<[^>]+>/g, '').trim();
+        if (plain.trim().length > 0 || htmlText.length > 0) {
+          postToHost({ type: 'paste' });
+          return;
+        }
+
+        // Pure-image clipboard (screenshot, "Copy image", multi-file select).
+        // Handle here directly so the cursor stays put right after the image.
+        const insertImage = function (url, altText) {
+          editor.exec('addImage', { imageUrl: url, altText: altText || 'image' });
+        };
+
+        // (1) File-kind images.
+        let handledAnyFile = false;
+        if (data.items) {
+          for (let i = 0; i < data.items.length; i++) {
+            const item = data.items[i];
+            if (item.kind === 'file' && item.type.indexOf('image/') === 0) {
+              const blob = item.getAsFile();
+              if (!blob) continue;
+              if (!handledAnyFile) {
+                e.preventDefault();
+                e.stopPropagation();
+                handledAnyFile = true;
+              }
+              handleImageBlob(blob, insertImage);
+            }
+          }
+        }
+        if (handledAnyFile) return;
+
+        // (2) HTML form with only <img src="data:..."> tags (no real text).
+        if (html) {
+          const re = /src=["'](data:image\/[a-zA-Z+]+;base64,[^"']+)["']/g;
+          let m, handledAnyHtml = false;
+          while ((m = re.exec(html)) !== null) {
+            const dataUrl = m[1];
+            if (!handledAnyHtml) {
+              e.preventDefault();
+              e.stopPropagation();
+              handledAnyHtml = true;
+            }
+            const semi = dataUrl.indexOf(';');
+            const comma = dataUrl.indexOf(',');
+            const mime = dataUrl.substring(5, semi);
+            const base64 = dataUrl.substring(comma + 1);
+            const id = ++imageReqSeq;
+            imageRequests[id] = { callback: insertImage, dataUrl: dataUrl };
+            postToHost({ type: 'saveImage', requestId: id, mime: mime, data: base64 });
+          }
+        }
+      }, true);
     }
 
     function createEditor(theme) {
@@ -54,21 +166,34 @@
             if (suppress) return;
             postToHost({ type: 'change', markdown: editor.getMarkdown() });
           }
+        },
+        // Wired for drops + the toolbar image button; paste is handled below.
+        hooks: {
+          addImageBlobHook: handleImageBlob
         }
       });
+
+      installPasteImageHandler();
     }
 
-    function setMarkdown(md) {
+    function setMarkdown(md, cursorToEnd) {
       // Replace content without raising a change back to the host.
       suppress = true;
-      editor.setMarkdown(md || '', false);
+      editor.setMarkdown(md || '', !!cursorToEnd);
       suppress = false;
     }
 
     window.chrome.webview.addEventListener('message', function (e) {
       const msg = JSON.parse(e.data);
       if (msg.type === 'setMarkdown') {
-        setMarkdown(msg.markdown);
+        setMarkdown(msg.markdown, msg.cursorToEnd);
+      } else if (msg.type === 'imageSaved') {
+        const req = imageRequests[msg.requestId];
+        if (!req) return;
+        delete imageRequests[msg.requestId];
+        // path === null means the host could not save (e.g. unsaved buffer);
+        // fall back to the original base64 data URL so the paste still works.
+        req.callback(msg.path || req.dataUrl, 'image');
       }
     });
 

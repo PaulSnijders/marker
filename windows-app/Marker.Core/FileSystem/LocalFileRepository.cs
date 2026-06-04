@@ -78,6 +78,8 @@ public sealed class LocalFileRepository : IFileRepository
         File.WriteAllBytes(path, payload);
     }
 
+    public void WriteBytes(string path, byte[] data) => File.WriteAllBytes(path, data);
+
     public void CreateFile(string path)
     {
         if (!File.Exists(path))

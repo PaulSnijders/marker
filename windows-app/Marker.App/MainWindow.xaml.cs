@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -36,6 +37,7 @@ public partial class MainWindow : Window
     private EditorTabViewModel? _currentTab;     // tab shown in the AvalonEdit host
     private EditorTabViewModel? _webTab;         // tab currently driving the WebView2
     private MarkdownMode _webMode;
+    private bool _nextChangeFromPaste;           // one-shot: strip <br> tags emitted by Toast UI
     private bool _webReady;                      // CoreWebView2 initialized
     private bool _webAvailable = true;           // false if WebView2 runtime missing
     private bool _startupComplete;               // true once the window finished loading
@@ -1433,17 +1435,46 @@ public partial class MainWindow : Window
     {
         _webTab = tab;
         _webMode = MarkdownMode.Rich;
+        EnsureTabDocHost(tab);
+        // The &v=… cache-buster matches NavigateRead — without it WebView2
+        // happily serves a stale editor.html after the app is updated.
         Web.CoreWebView2.Navigate(
-            $"https://marker.assets/editor.html?theme={ThemeManager.CurrentTheme}");
+            $"https://marker.assets/editor.html?theme={ThemeManager.CurrentTheme}&v={Environment.TickCount}");
     }
 
     private void NavigateRead(EditorTabViewModel tab)
     {
         _webTab = tab;
         _webMode = MarkdownMode.Read;
+        EnsureTabDocHost(tab);
         string html = BuildReadHtml(tab.Document.Text);
         File.WriteAllText(ReadFilePath, html, new UTF8Encoding(false));
         Web.CoreWebView2.Navigate($"https://marker.assets/__read.html?v={Environment.TickCount}");
+    }
+
+    /// <summary>
+    /// Maps the <c>marker.docs</c> virtual host to the current tab's folder so
+    /// relative image/link references in the markdown (e.g. <c>images/foo.png</c>)
+    /// resolve next to the file. A <c>&lt;base href="https://marker.docs/"&gt;</c>
+    /// in the editor/read pages routes all relative URLs here, while bundled
+    /// JS/CSS keep loading from <c>marker.assets</c>. The mapping is cleared
+    /// when the tab has no on-disk path so a stale folder can't leak through.
+    /// </summary>
+    private void EnsureTabDocHost(EditorTabViewModel tab)
+    {
+        string? dir = string.IsNullOrEmpty(tab.FilePath)
+            ? null
+            : Path.GetDirectoryName(tab.FilePath);
+
+        if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+        {
+            Web.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                "marker.docs", dir, CoreWebView2HostResourceAccessKind.Allow);
+        }
+        else
+        {
+            Web.CoreWebView2.ClearVirtualHostNameToFolderMapping("marker.docs");
+        }
     }
 
     private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -1457,12 +1488,53 @@ public partial class MainWindow : Window
             {
                 PushMarkdownToEditor(_webTab.Document.Text);
             }
+            else if (type == "paste")
+            {
+                // The page just let ProseMirror handle a mixed text/image
+                // paste. The next change event will carry the resulting
+                // markdown — apply paste-only cleanups to it.
+                _nextChangeFromPaste = true;
+            }
             else if (type == "change" && _webTab is not null)
             {
                 string markdown = doc.RootElement.GetProperty("markdown").GetString() ?? "";
+                string cleaned = markdown;
+
+                // Sweep any inline base64 images out to disk. Catches mixed
+                // text+image pastes where Toast UI's default paste handler
+                // skipped image processing (because of text/rtf on the
+                // clipboard) and ProseMirror inserted base64 data URLs.
+                cleaned = SweepBase64ImagesToDisk(_webTab, cleaned);
+
+                if (_nextChangeFromPaste)
+                {
+                    _nextChangeFromPaste = false;
+                    // Strip <br> tags Toast UI emits for soft line breaks in
+                    // pasted rich text. Scoped to the post-paste change so
+                    // <br> the user types by hand survives untouched.
+                    cleaned = StripPasteArtifacts(cleaned);
+                }
+
+                if (!ReferenceEquals(cleaned, markdown))
+                {
+                    markdown = cleaned;
+                    // Push the cleaned markdown back so the editor stops
+                    // carrying megabyte base64 strings in memory. cursorToEnd
+                    // keeps focus at the end of the paste rather than top.
+                    PushMarkdownToEditor(markdown, cursorToEnd: true);
+                }
+
                 // Updating the document raises TextChanged, which flags the tab dirty.
                 if (_webTab.Document.Text != markdown)
                     _webTab.Document.Text = markdown;
+            }
+            else if (type == "saveImage" && _webTab is not null)
+            {
+                int requestId = doc.RootElement.GetProperty("requestId").GetInt32();
+                string mime   = doc.RootElement.GetProperty("mime").GetString() ?? "image/png";
+                string base64 = doc.RootElement.GetProperty("data").GetString() ?? "";
+                string? rel   = TrySaveImageForTab(_webTab, mime, base64);
+                ReplyImageSaved(requestId, rel);
             }
         }
         catch
@@ -1471,11 +1543,129 @@ public partial class MainWindow : Window
         }
     }
 
-    private void PushMarkdownToEditor(string markdown)
+    private void PushMarkdownToEditor(string markdown, bool cursorToEnd = false)
     {
-        string payload = JsonSerializer.Serialize(new { type = "setMarkdown", markdown });
+        string payload = JsonSerializer.Serialize(new { type = "setMarkdown", markdown, cursorToEnd });
         Web.CoreWebView2.PostWebMessageAsString(payload);
     }
+
+    // Matches a markdown image whose URL is an inline base64 data URL:
+    //   ![alt](data:image/png;base64,iVBORw0KGgo…)
+    // Base64 chars are [A-Za-z0-9+/=]; whitespace is never injected by Toast UI.
+    private static readonly Regex Base64ImageMarkdownRegex = new(
+        @"!\[([^\]]*)\]\(data:(image\/[a-zA-Z+]+);base64,([A-Za-z0-9+/=]+)\)",
+        RegexOptions.Compiled);
+
+    // Toast UI serializes soft line breaks in pasted rich text as literal
+    // <br> tags. Matches <br>, <br/>, <br />, and any attribute variants.
+    private static readonly Regex BrTagRegex = new(
+        @"<br\b[^>]*>",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Removes rich-text leftovers Toast UI emits after a paste — currently
+    /// just <c>&lt;br&gt;</c> in its various spellings. Called only on the
+    /// change event immediately following a paste, so <c>&lt;br&gt;</c> tags
+    /// the user typed by hand are left alone.
+    /// </summary>
+    private static string StripPasteArtifacts(string markdown)
+    {
+        if (markdown.IndexOf("<br", StringComparison.OrdinalIgnoreCase) < 0)
+            return markdown;
+        return BrTagRegex.Replace(markdown, string.Empty);
+    }
+
+    /// <summary>
+    /// Rewrites <c>![alt](data:image/…;base64,…)</c> occurrences in the
+    /// markdown by saving each image next to the tab's file and replacing the
+    /// data URL with the resulting relative path. Returns the original
+    /// instance unchanged (same reference) when nothing matched, so callers
+    /// can cheaply detect the "no work done" case.
+    /// </summary>
+    private static string SweepBase64ImagesToDisk(EditorTabViewModel tab, string markdown)
+    {
+        if (markdown.IndexOf("data:image/", StringComparison.Ordinal) < 0)
+            return markdown;
+
+        bool changed = false;
+        string result = Base64ImageMarkdownRegex.Replace(markdown, match =>
+        {
+            string alt    = match.Groups[1].Value;
+            string mime   = match.Groups[2].Value;
+            string base64 = match.Groups[3].Value;
+            string? rel   = TrySaveImageForTab(tab, mime, base64);
+            if (rel is null) return match.Value;   // unsaved tab or write failed — leave base64 alone
+            changed = true;
+            return $"![{alt}]({rel})";
+        });
+
+        return changed ? result : markdown;
+    }
+
+    /// <summary>
+    /// Persists a pasted/dropped image next to the tab's markdown file in a
+    /// sibling <c>images/</c> folder, returning the relative path to embed in
+    /// the markdown (e.g. <c>images/image-20260604-103045-A1B.png</c>).
+    /// Returns null if the tab has no on-disk file yet, or if writing fails —
+    /// the page then falls back to embedding the original base64 data URL.
+    /// </summary>
+    private static string? TrySaveImageForTab(EditorTabViewModel tab, string mime, string base64)
+    {
+        try
+        {
+            string filePath = tab.FilePath ?? "";
+            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+                return null;
+
+            string? dir = Path.GetDirectoryName(filePath);
+            if (string.IsNullOrEmpty(dir))
+                return null;
+
+            string imagesDir = Path.Combine(dir, "images");
+            AppServices.Files.CreateDirectory(imagesDir);
+
+            string ext = ExtensionForMime(mime);
+            string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            string fileName;
+            string absolute;
+            // Collision-resistant: timestamp + 3 hex chars, retry a few times if unlucky.
+            for (int attempt = 0; ; attempt++)
+            {
+                string suffix = Random.Shared.Next(0, 0x1000).ToString("X3");
+                fileName = $"image-{stamp}-{suffix}{ext}";
+                absolute = Path.Combine(imagesDir, fileName);
+                if (!File.Exists(absolute)) break;
+                if (attempt > 8) return null;
+            }
+
+            byte[] bytes = Convert.FromBase64String(base64);
+            AppServices.Files.WriteBytes(absolute, bytes);
+
+            return "images/" + fileName;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void ReplyImageSaved(int requestId, string? path)
+    {
+        string payload = JsonSerializer.Serialize(new { type = "imageSaved", requestId, path });
+        Web.CoreWebView2.PostWebMessageAsString(payload);
+    }
+
+    private static string ExtensionForMime(string mime) => mime.ToLowerInvariant() switch
+    {
+        "image/png"  => ".png",
+        "image/jpeg" => ".jpg",
+        "image/jpg"  => ".jpg",
+        "image/gif"  => ".gif",
+        "image/webp" => ".webp",
+        "image/bmp"  => ".bmp",
+        "image/svg+xml" => ".svg",
+        _ => ".png"
+    };
 
     /// <summary>
     /// Intercepts link clicks inside the rendered markdown (read mode) and the
@@ -1501,10 +1691,12 @@ public partial class MainWindow : Window
         if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed))
             return;
 
-        // marker.assets is the virtual host serving our read page — any other
-        // path under it is a relative link from the markdown source.
+        // marker.assets serves the bundled web pages; marker.docs is mapped
+        // per-tab to the current markdown file's folder. Any other path under
+        // either virtual host is a relative link from the markdown source.
         if (parsed.Scheme == "https" &&
-            parsed.Host.Equals("marker.assets", StringComparison.OrdinalIgnoreCase))
+            (parsed.Host.Equals("marker.assets", StringComparison.OrdinalIgnoreCase) ||
+             parsed.Host.Equals("marker.docs",   StringComparison.OrdinalIgnoreCase)))
         {
             OpenRelativeLink(parsed);
             return;
@@ -2357,7 +2549,12 @@ public partial class MainWindow : Window
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<link rel="stylesheet" href="{{HLJS}}" />
+<!-- Relative URLs in the rendered markdown (images, links) resolve against the
+     tab's folder via the per-tab marker.docs virtual host. Bundled assets stay
+     on marker.assets — see EnsureTabDocHost. -->
+<base href="https://marker.docs/" />
+<link rel="icon" href="data:," />
+<link rel="stylesheet" href="https://marker.assets/{{HLJS}}" />
 <style>
   html, body { margin: 0; background: {{BG}}; color: {{FG}}; }
   body {
@@ -2383,7 +2580,7 @@ public partial class MainWindow : Window
 </head>
 <body>
 <article>{{BODY}}</article>
-<script src="highlight.min.js"></script>
+<script src="https://marker.assets/highlight.min.js"></script>
 <script>hljs.highlightAll();</script>
 </body>
 </html>

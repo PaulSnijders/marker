@@ -19,6 +19,9 @@ public interface IFileRepository
     /// <summary>Writes text back, preserving the encoding and line endings of <paramref name="content"/>.</summary>
     void WriteText(string path, TextFileContent content);
 
+    /// <summary>Writes raw bytes to a file (for binary assets such as pasted images).</summary>
+    void WriteBytes(string path, byte[] data);
+
     void CreateFile(string path);
     void CreateDirectory(string path);
 
