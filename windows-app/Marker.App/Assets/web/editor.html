@@ -12,7 +12,10 @@
   <link rel="stylesheet" href="https://marker.assets/toastui-editor.min.css" />
   <link rel="stylesheet" href="https://marker.assets/toastui-editor-dark.min.css" />
   <style>
-    html, body { height: 100%; margin: 0; padding: 0; }
+    /* overflow: hidden on the page so only Toast UI's own internal scrollbar
+       shows. Without it, the toolbar + status bar push #editor a few pixels
+       past the viewport and we get a second, outer browser scrollbar. */
+    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
     #editor { height: 100vh; }
     body.marker-dark { background: #1e1e1e; }
   </style>

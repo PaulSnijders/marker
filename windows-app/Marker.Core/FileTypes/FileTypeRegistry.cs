@@ -24,6 +24,16 @@ public sealed class FileTypeRegistry : IFileTypeRegistry
         [".yml"]      = new("YAML", "YAML", IsMarkdown: false),
         [".csv"]      = new("CSV", null, IsMarkdown: false),
         [".log"]      = new("Log", null, IsMarkdown: false),
+
+        // Images — shown inline in a dedicated host instead of the text editor.
+        // .svg is intentionally absent: it stays text/binary (it's XML).
+        [".png"]      = new("PNG image",  null, IsMarkdown: false, IsImage: true),
+        [".jpg"]      = new("JPEG image", null, IsMarkdown: false, IsImage: true),
+        [".jpeg"]     = new("JPEG image", null, IsMarkdown: false, IsImage: true),
+        [".gif"]      = new("GIF image",  null, IsMarkdown: false, IsImage: true),
+        [".bmp"]      = new("Bitmap",     null, IsMarkdown: false, IsImage: true),
+        [".webp"]     = new("WebP image", null, IsMarkdown: false, IsImage: true),
+        [".ico"]      = new("Icon",       null, IsMarkdown: false, IsImage: true),
     };
 
     private static readonly FileTypeInfo Unknown = new("Text", null, IsMarkdown: false);

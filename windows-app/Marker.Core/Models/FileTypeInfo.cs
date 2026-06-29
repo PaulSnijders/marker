@@ -10,7 +10,12 @@ namespace Marker.Core.Models;
 /// Built-in names ("XML") or custom ones ("Markdown", "JSON", "YAML").
 /// </param>
 /// <param name="IsMarkdown">True when the Source/Rich/Read mode switch applies.</param>
+/// <param name="IsImage">
+/// True for raster image formats Marker can render inline (PNG/JPG/etc.). Such
+/// files are opened in a dedicated image host, not the text editor.
+/// </param>
 public sealed record FileTypeInfo(
     string DisplayName,
     string? HighlightingName,
-    bool IsMarkdown);
+    bool IsMarkdown,
+    bool IsImage = false);

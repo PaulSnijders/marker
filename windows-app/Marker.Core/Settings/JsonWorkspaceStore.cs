@@ -39,6 +39,11 @@ public sealed class JsonWorkspaceStore : IWorkspaceStore
                 if (ws is not null && !string.IsNullOrWhiteSpace(ws.Name))
                 {
                     ws.FilePath = file;
+                    // System.Text.Json cannot round-trip a custom IEqualityComparer
+                    // on a Dictionary, so rebuild it case-insensitively — Windows
+                    // paths compare that way and the in-memory lookup relies on it.
+                    ws.FilePositions = new Dictionary<string, FilePositionState>(
+                        ws.FilePositions, StringComparer.OrdinalIgnoreCase);
                     result.Add(ws);
                 }
             }

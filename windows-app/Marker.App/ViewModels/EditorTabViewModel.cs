@@ -41,6 +41,16 @@ public sealed partial class EditorTabViewModel : ObservableObject
     [ObservableProperty] private int _caretLine = 1;
     [ObservableProperty] private int _caretColumn = 1;
 
+    /// <summary>
+    /// Last known vertical scroll offset of this tab in the shared editor.
+    /// Captured on tab leave / workspace save and restored when the tab
+    /// becomes active again. Plain property — nothing in the UI binds to it.
+    /// </summary>
+    public double VerticalOffset { get; set; }
+
+    /// <summary>Horizontal counterpart of <see cref="VerticalOffset"/>.</summary>
+    public double HorizontalOffset { get; set; }
+
     /// <summary>The editable text + undo history for this file.</summary>
     public TextDocument Document { get; }
 
@@ -51,6 +61,12 @@ public sealed partial class EditorTabViewModel : ObservableObject
 
     /// <summary>True when markdown view-mode switching applies to this tab.</summary>
     public bool IsMarkdown => FileType.IsMarkdown && !IsBinary;
+
+    /// <summary>
+    /// True when this tab is a raster image — rendered in the dedicated image
+    /// host rather than the text editor.
+    /// </summary>
+    public bool IsImage => FileType.IsImage;
 
     public string EncodingLabel => _origin.EncodingLabel;
     public string LineEndingLabel => _origin.LineEndingLabel;

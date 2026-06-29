@@ -45,7 +45,8 @@
             <MenuItem Header="Rename…" InputGestureText="F2" Click="OnRename" />
             <MenuItem Header="Delete" Click="OnDelete" />
             <Separator />
-            <MenuItem Header="Reveal in Explorer" Click="OnRevealInExplorer" />
+            <MenuItem Header="Reveal in Explorer" InputGestureText="Shift+Alt+R" Click="OnRevealInExplorer" />
+            <MenuItem Header="Copy Full Path" InputGestureText="Shift+Alt+C" Click="OnNodeCopyPath" />
             <MenuItem Header="Remove Folder from Workspace" Click="OnRemoveFolder" />
         </ContextMenu>
 
@@ -66,8 +67,8 @@
             <MenuItem Header="Close Other Tabs" Click="OnTabCtxCloseOthers" />
             <MenuItem Header="Close All Tabs" Click="OnTabCtxCloseAll" />
             <Separator />
-            <MenuItem Header="Reveal in Explorer" Click="OnTabCtxReveal" />
-            <MenuItem Header="Copy Full Path" Click="OnTabCtxCopyPath" />
+            <MenuItem Header="Reveal in Explorer" InputGestureText="Shift+Alt+R" Click="OnTabCtxReveal" />
+            <MenuItem Header="Copy Full Path" InputGestureText="Shift+Alt+C" Click="OnTabCtxCopyPath" />
         </ContextMenu>
 
         <!-- Editor tab item -->
@@ -129,6 +130,8 @@
               Background="{DynamicResource PanelBackground}"
               Foreground="{DynamicResource AppForeground}">
             <MenuItem Header="_File">
+                <MenuItem Header="Open File…" InputGestureText="Ctrl+O"
+                          Click="OnOpenFile" />
                 <MenuItem Header="Quick Open File…" InputGestureText="Ctrl+P"
                           Click="OnQuickOpenFile" />
                 <Separator />
@@ -329,6 +332,23 @@
                                            Foreground="{DynamicResource AppForeground}"
                                            Padding="20,12" />
                     <wv2:WebView2 x:Name="Web" Visibility="Collapsed" />
+                    <ScrollViewer x:Name="ImageHost" Visibility="Collapsed"
+                                  Background="{DynamicResource EditorBackground}"
+                                  HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollBarVisibility="Auto"
+                                  Cursor="Hand"
+                                  MouseLeftButtonUp="OnImageClicked"
+                                  ToolTip="Click to open with another program…">
+                        <!-- Stretch=Uniform + StretchDirection=DownOnly = natural
+                             size, shrunk uniformly only if it overflows. The
+                             click handler lives on the ScrollViewer so empty
+                             space around a small image still opens the picker. -->
+                        <Image x:Name="ImageView"
+                               Stretch="Uniform"
+                               StretchDirection="DownOnly"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center" />
+                    </ScrollViewer>
                     <Border x:Name="BinaryNotice" Visibility="Collapsed"
                             Background="{DynamicResource EditorBackground}">
                         <TextBlock Text="Binary file — cannot edit."

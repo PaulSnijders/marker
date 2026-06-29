@@ -601,6 +601,10 @@ public partial class MainWindow : Window
     {
         if (_activeWorkspace is null || _switchingWorkspace)
             return;
+
+        // Fold the freshest scroll position into the active tab before we read.
+        CaptureCurrentTabPosition();
+
         _activeWorkspace.Folders = _vm.RootFolders.Select(n => n.Path).ToList();
         _activeWorkspace.ExpandedFolders = CollectExpandedFolders();
         // Sneak-peeks are transient and the help document belongs to no
@@ -609,6 +613,29 @@ public partial class MainWindow : Window
             .Where(t => !t.IsPreview && !IsHelpFile(t.FilePath))
             .Select(t => t.FilePath)
             .ToList();
+
+        var sel = _vm.SelectedTab;
+        _activeWorkspace.LastActiveFile =
+            (sel is not null && !sel.IsPreview && !IsHelpFile(sel.FilePath))
+                ? sel.FilePath
+                : null;
+
+        // Bounded growth: only persist positions for currently-open, eligible
+        // tabs. Stale entries for files the user has since closed drop out.
+        var positions = new Dictionary<string, FilePositionState>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in _vm.Tabs)
+        {
+            if (t.IsPreview || IsHelpFile(t.FilePath)) continue;
+            positions[t.FilePath] = new FilePositionState
+            {
+                CaretLine = t.CaretLine,
+                CaretColumn = t.CaretColumn,
+                VerticalOffset = t.VerticalOffset,
+                HorizontalOffset = t.HorizontalOffset,
+            };
+        }
+        _activeWorkspace.FilePositions = positions;
+
         try { AppServices.SaveWorkspace(_activeWorkspace); }
         catch { /* a workspace write must never interrupt the user */ }
     }
@@ -640,8 +667,41 @@ public partial class MainWindow : Window
     {
         if (_suppressWorkspaceSelection || !_startupComplete)
             return;
-        if (WorkspaceSelector.SelectedItem is Workspace ws)
-            SwitchToWorkspace(ws);
+        if (WorkspaceSelector.SelectedItem is not Workspace ws)
+            return;
+
+        SwitchToWorkspace(ws);
+
+        // Move focus off the ComboBox into the active file's host. Without
+        // this, the dropdown keeps keyboard focus and the user's next arrow
+        // press silently flips to another workspace instead of moving the
+        // caret in the file. ContextIdle runs after WPF's own ComboBox
+        // post-selection focus restoration, so we land last.
+        Dispatcher.BeginInvoke(FocusActiveTabContent, DispatcherPriority.ContextIdle);
+    }
+
+    /// <summary>
+    /// Moves keyboard focus into whichever host is showing the active tab —
+    /// AvalonEdit for source files, the WebView2 for Rich/Read markdown, or
+    /// the file tree when there is no tab to land in.
+    /// </summary>
+    private void FocusActiveTabContent()
+    {
+        var tab = _vm.SelectedTab;
+        if (tab is null)
+        {
+            TreeViewMain.Focus();
+            return;
+        }
+
+        bool useWeb = tab.IsMarkdown && tab.Mode != MarkdownMode.Source &&
+                      _webAvailable && _webReady;
+        if (useWeb)
+            Web.Focus();
+        else if (tab.IsImage || tab.IsBinary)
+            TreeViewMain.Focus();
+        else
+            Editor.TextArea.Focus();
     }
 
     private void OnSwitchWorkspace(object sender, RoutedEventArgs e) => OpenWorkspaceSwitcher();
@@ -881,6 +941,10 @@ public partial class MainWindow : Window
                 OpenFile(node.Path, preview: true); // sneak peek
                 e.Handled = true;
                 break;
+            case Key.Delete:
+                DeleteNode(node);                   // confirms, then → Recycle Bin
+                e.Handled = true;
+                break;
         }
     }
 
@@ -1032,8 +1096,12 @@ public partial class MainWindow : Window
 
         try
         {
-            var content = AppServices.Files.ReadText(path);
             var type = AppServices.FileTypes.Resolve(path);
+            // Images are rendered in the image host, so we never read or decode
+            // the bytes as text — an empty TextFileContent is just a placeholder.
+            var content = type.IsImage
+                ? new Marker.Core.FileSystem.TextFileContent()
+                : AppServices.Files.ReadText(path);
             var mode = InitialModeFor(path, type);
 
             var tab = new EditorTabViewModel(path, content, type, mode);
@@ -1081,6 +1149,34 @@ public partial class MainWindow : Window
     /// <summary>Directory names skipped when gathering files for quick-open.</summary>
     private static readonly HashSet<string> QuickOpenSkip =
         new(StringComparer.OrdinalIgnoreCase) { ".git", ".vs", "bin", "obj", "node_modules" };
+
+    /// <summary>
+    /// Ctrl+O — the plain OS file picker. Unlike quick-open it isn't limited to
+    /// the workspace folders, so it's the way to open one-offs like a .env that
+    /// lives outside any tree root. "All Files" is the default filter; the typed
+    /// entries are just conveniences.
+    /// </summary>
+    private void OnOpenFile(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Open File",
+            Multiselect = true,
+            CheckFileExists = true,
+            Filter =
+                "All Files (*.*)|*.*|" +
+                "Markdown (*.md;*.markdown)|*.md;*.markdown|" +
+                "Text (*.txt;*.log)|*.txt;*.log|" +
+                "CSV (*.csv)|*.csv|" +
+                "Images (*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp;*.ico)" +
+                    "|*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp;*.ico",
+        };
+        if (dialog.ShowDialog(this) != true)
+            return;
+
+        foreach (string path in dialog.FileNames)
+            OpenFile(path);
+    }
 
     private void OnQuickOpenFile(object sender, RoutedEventArgs e) => OnQuickOpen();
 
@@ -1234,11 +1330,42 @@ public partial class MainWindow : Window
 
     private void ReopenFiles(Workspace ws)
     {
+        EditorTabViewModel? lastActive = null;
+
         foreach (string path in ws.OpenFiles.ToList())
         {
-            if (File.Exists(path))
-                OpenFile(path);
+            if (!File.Exists(path)) continue;
+            OpenFile(path);
+
+            // OpenFile creates and selects the tab; find it back so we can
+            // seed its remembered caret + scroll before it becomes visible.
+            var tab = _vm.Tabs.LastOrDefault(
+                t => string.Equals(t.FilePath, path, StringComparison.OrdinalIgnoreCase));
+            if (tab is null) continue;
+
+            if (ws.FilePositions.TryGetValue(path, out var pos))
+            {
+                tab.CaretLine = pos.CaretLine;
+                tab.CaretColumn = pos.CaretColumn;
+                tab.VerticalOffset = pos.VerticalOffset;
+                tab.HorizontalOffset = pos.HorizontalOffset;
+            }
+
+            if (ws.LastActiveFile is { } target &&
+                string.Equals(target, path, StringComparison.OrdinalIgnoreCase))
+                lastActive = tab;
         }
+
+        // Pick the saved last-active tab. Fall back to the first persisted
+        // tab when the saved file is gone or this is an older workspace.
+        var pick = lastActive ?? _vm.Tabs.FirstOrDefault(
+            t => !t.IsPreview && !IsHelpFile(t.FilePath));
+        if (pick is null) return;
+
+        if (!ReferenceEquals(pick, _vm.SelectedTab))
+            _vm.SelectedTab = pick;          // triggers ApplyTab → RestoreTabPosition
+        else
+            ApplyTab();                       // selection unchanged, but positions were just seeded
     }
 
     private void OnTabPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -1249,6 +1376,10 @@ public partial class MainWindow : Window
 
     private void OnSelectedTabChanged()
     {
+        // Snapshot the scroll position of the tab we are leaving before its
+        // document is swapped out — caret line/column are already live-tracked.
+        CaptureCurrentTabPosition();
+
         // Auto-save the tab we are leaving, then show the newly selected one.
         if (AppServices.Settings.AutoSave &&
             _currentTab is { IsDirty: true, IsBinary: false } leaving &&
@@ -1258,6 +1389,57 @@ public partial class MainWindow : Window
         }
         ApplyTab();
         CheckCurrentFileForExternalChanges();
+    }
+
+    /// <summary>
+    /// Reads the editor's current scroll offset onto the tab we are about to
+    /// leave so the next visit can restore it. Caret line/column already live
+    /// on the tab via the PositionChanged hook in the editor wiring.
+    /// </summary>
+    private void CaptureCurrentTabPosition()
+    {
+        if (_currentTab is null || _currentTab.IsImage || _currentTab.IsBinary)
+            return;
+        // Only meaningful while the shared editor is actually showing this tab.
+        if (!ReferenceEquals(Editor.Document, _currentTab.Document))
+            return;
+        _currentTab.VerticalOffset = Editor.VerticalOffset;
+        _currentTab.HorizontalOffset = Editor.HorizontalOffset;
+    }
+
+    /// <summary>
+    /// Puts the caret and scroll offset back where this tab was last left.
+    /// Caret can move synchronously (the document is now live), but scroll
+    /// is deferred to <see cref="DispatcherPriority.Loaded"/> — AvalonEdit
+    /// has not measured the new document yet, and a synchronous
+    /// <c>ScrollToVerticalOffset</c> would be clamped to 0.
+    /// </summary>
+    private void RestoreTabPosition(EditorTabViewModel tab)
+    {
+        try
+        {
+            int lineCount = Math.Max(1, tab.Document.LineCount);
+            int line = Math.Clamp(tab.CaretLine, 1, lineCount);
+            var docLine = tab.Document.GetLineByNumber(line);
+            int col = Math.Clamp(tab.CaretColumn, 1, Math.Max(1, docLine.Length + 1));
+            Editor.CaretOffset = docLine.Offset + (col - 1);
+        }
+        catch
+        {
+            // A pathological document is not worth interrupting the user — the
+            // editor will just open with the caret at the start.
+        }
+
+        double vOff = tab.VerticalOffset;
+        double hOff = tab.HorizontalOffset;
+        Dispatcher.BeginInvoke(() =>
+        {
+            // Rapid tab switching may have moved on — only restore if the
+            // editor is still showing this tab's document.
+            if (!ReferenceEquals(Editor.Document, tab.Document)) return;
+            Editor.ScrollToVerticalOffset(vOff);
+            Editor.ScrollToHorizontalOffset(hOff);
+        }, DispatcherPriority.Loaded);
     }
 
     private void OnTabPreviewMouseDown(object sender, MouseButtonEventArgs e)
@@ -1343,12 +1525,60 @@ public partial class MainWindow : Window
 
     private void OnTabCtxReveal(object sender, RoutedEventArgs e)
     {
-        if (TabFromMenu(sender) is not { } tab)
+        if (TabFromMenu(sender) is { } tab)
+            RevealInExplorer(tab.FilePath, isDirectory: false);
+    }
+
+    private void OnTabCtxCopyPath(object sender, RoutedEventArgs e)
+    {
+        if (TabFromMenu(sender) is { } tab)
+            CopyPathToClipboard(tab.FilePath);
+    }
+
+    /// <summary>
+    /// Reveals the active file in Explorer — the focused tree node when the tree
+    /// has focus, otherwise the file in the current tab. Shared by the
+    /// Shift+Alt+R shortcut and the context-menu entries.
+    /// </summary>
+    private void RevealCurrentContext()
+    {
+        if (TreeViewMain.IsKeyboardFocusWithin
+            && _vm.SelectedNode is { IsPlaceholder: false } node)
+        {
+            RevealInExplorer(node.Path, node.IsDirectory);
+            return;
+        }
+
+        if (_vm.SelectedTab is { FilePath: { Length: > 0 } path })
+            RevealInExplorer(path, isDirectory: false);
+    }
+
+    /// <summary>
+    /// Copies the active file's full path — the focused tree node when the tree
+    /// has focus, otherwise the file in the current tab. Shared by the
+    /// Shift+Alt+C shortcut and the context-menu entries.
+    /// </summary>
+    private void CopyPathCurrentContext()
+    {
+        if (TreeViewMain.IsKeyboardFocusWithin
+            && _vm.SelectedNode is { IsPlaceholder: false } node)
+        {
+            CopyPathToClipboard(node.Path);
+            return;
+        }
+
+        if (_vm.SelectedTab is { FilePath: { Length: > 0 } path })
+            CopyPathToClipboard(path);
+    }
+
+    private static void RevealInExplorer(string path, bool isDirectory)
+    {
+        if (string.IsNullOrEmpty(path))
             return;
         try
         {
-            Process.Start(new ProcessStartInfo(
-                "explorer.exe", $"/select,\"{tab.FilePath}\"") { UseShellExecute = true });
+            string args = isDirectory ? $"\"{path}\"" : $"/select,\"{path}\"";
+            Process.Start(new ProcessStartInfo("explorer.exe", args) { UseShellExecute = true });
         }
         catch
         {
@@ -1356,11 +1586,11 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnTabCtxCopyPath(object sender, RoutedEventArgs e)
+    private static void CopyPathToClipboard(string path)
     {
-        if (TabFromMenu(sender) is not { } tab)
+        if (string.IsNullOrEmpty(path))
             return;
-        try { Clipboard.SetText(tab.FilePath); }
+        try { Clipboard.SetText(path); }
         catch { /* clipboard can be briefly locked by another app */ }
     }
 
@@ -1393,6 +1623,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (tab.IsImage)
+        {
+            LoadImageInto(ImageView, tab.FilePath);
+            ShowHost(ImageHost);
+            return;
+        }
+
         if (tab.IsBinary)
         {
             ShowHost(BinaryNotice);
@@ -1401,6 +1638,7 @@ public partial class MainWindow : Window
 
         // Keep the editor document in sync so returning to source is instant.
         Editor.Document = tab.Document;
+        RestoreTabPosition(tab);
 
         bool useWeb = tab.IsMarkdown && tab.Mode != MarkdownMode.Source && _webAvailable && _webReady;
         if (useWeb)
@@ -1424,8 +1662,104 @@ public partial class MainWindow : Window
     {
         Editor.Visibility = target == Editor ? Visibility.Visible : Visibility.Collapsed;
         Web.Visibility = target == Web ? Visibility.Visible : Visibility.Collapsed;
+        ImageHost.Visibility = target == ImageHost ? Visibility.Visible : Visibility.Collapsed;
         BinaryNotice.Visibility = target == BinaryNotice ? Visibility.Visible : Visibility.Collapsed;
         EmptyState.Visibility = target == EmptyState ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// Loads <paramref name="path"/> into <paramref name="target"/> via a frozen
+    /// <see cref="System.Windows.Media.Imaging.BitmapImage"/>. <c>OnLoad</c> caching
+    /// avoids holding a file lock so the user can save back over the file from
+    /// Paint.NET (or anything else) while it's open in Marker.
+    /// </summary>
+    private static void LoadImageInto(System.Windows.Controls.Image target, string path)
+    {
+        try
+        {
+            var bmp = new System.Windows.Media.Imaging.BitmapImage();
+            bmp.BeginInit();
+            bmp.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+            bmp.CreateOptions = System.Windows.Media.Imaging.BitmapCreateOptions.IgnoreImageCache;
+            bmp.UriSource = new Uri(path, UriKind.Absolute);
+            bmp.EndInit();
+            bmp.Freeze();
+            target.Source = bmp;
+        }
+        catch
+        {
+            // Codec missing (e.g. .webp on older Windows) or corrupt file — leave
+            // the host blank rather than crash; the user can still Reveal it.
+            target.Source = null;
+        }
+    }
+
+    /// <summary>
+    /// Click in the image host → Windows native "Open with…" dialog so the
+    /// user can hand the file to Paint.NET / Photos / anything installed.
+    /// Uses <see cref="SHOpenWithDialog"/> (the modern Win10/11 picker) with
+    /// a <c>rundll32 OpenAs_RunDLL</c> fallback for older shells.
+    /// </summary>
+    private void OnImageClicked(object sender, MouseButtonEventArgs e)
+    {
+        var path = _vm.SelectedTab?.FilePath;
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            return;
+
+        IntPtr hwnd = new WindowInteropHelper(this).Handle;
+        var info = new OPENASINFO
+        {
+            pcszFile = path,
+            pcszClass = null,
+            oaifInFlags = OAIF.ALLOW_REGISTRATION | OAIF.EXEC,
+        };
+
+        try
+        {
+            SHOpenWithDialog(hwnd, ref info);
+            return;
+        }
+        catch
+        {
+            // Fall through to the legacy path.
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "rundll32.exe",
+                Arguments = $"shell32.dll,OpenAs_RunDLL \"{path}\"",
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Could not show the Open with dialog:\n\n{ex.Message}",
+                "Marker", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    // --- SHOpenWithDialog P/Invoke ------------------------------------
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, PreserveSig = false)]
+    private static extern void SHOpenWithDialog(IntPtr hwndParent, ref OPENASINFO oOAI);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct OPENASINFO
+    {
+        [MarshalAs(UnmanagedType.LPWStr)] public string pcszFile;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? pcszClass;
+        public OAIF oaifInFlags;
+    }
+
+    [Flags]
+    private enum OAIF : uint
+    {
+        ALLOW_REGISTRATION = 0x00000001,
+        REGISTER_EXT       = 0x00000002,
+        EXEC               = 0x00000004,
+        HIDE_REGISTRATION  = 0x00000020,
     }
 
     private static IHighlightingDefinition? ResolveHighlighting(string? name)
@@ -2067,9 +2401,17 @@ public partial class MainWindow : Window
 
     private void OnDelete(object sender, RoutedEventArgs e)
     {
-        if (_vm.SelectedNode is not { IsPlaceholder: false } node)
-            return;
+        if (_vm.SelectedNode is { IsPlaceholder: false } node)
+            DeleteNode(node);
+    }
 
+    /// <summary>
+    /// Confirms with the user, then moves <paramref name="node"/>'s path to the
+    /// Windows Recycle Bin and tears down any open tabs under it. Shared by
+    /// the context-menu Delete and the Del key on the tree.
+    /// </summary>
+    private void DeleteNode(FileSystemNodeViewModel node)
+    {
         if (MessageBox.Show(this, $"Move '{node.Name}' to the Recycle Bin?", "Marker",
                 MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
             return;
@@ -2098,19 +2440,14 @@ public partial class MainWindow : Window
 
     private void OnRevealInExplorer(object sender, RoutedEventArgs e)
     {
-        if (_vm.SelectedNode is not { IsPlaceholder: false } node)
-            return;
-        try
-        {
-            if (node.IsDirectory)
-                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{node.Path}\"") { UseShellExecute = true });
-            else
-                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{node.Path}\"") { UseShellExecute = true });
-        }
-        catch
-        {
-            // Explorer failing to launch is not worth interrupting the user.
-        }
+        if (_vm.SelectedNode is { IsPlaceholder: false } node)
+            RevealInExplorer(node.Path, node.IsDirectory);
+    }
+
+    private void OnNodeCopyPath(object sender, RoutedEventArgs e)
+    {
+        if (_vm.SelectedNode is { IsPlaceholder: false } node)
+            CopyPathToClipboard(node.Path);
     }
 
     private void RebaseOpenTabs(string oldPath, string newPath)
@@ -2364,8 +2701,30 @@ public partial class MainWindow : Window
         Editor.CaretOffset = caret;
         if (length > 0)
             Editor.Select(caret, length);
-        Editor.ScrollToLine(lineNumber);
+        ScrollLineToCenter(lineNumber);
         Dispatcher.BeginInvoke(() => Editor.TextArea.Focus(), DispatcherPriority.Input);
+    }
+
+    /// <summary>
+    /// Scrolls the editor so <paramref name="lineNumber"/> sits roughly in the
+    /// middle of the viewport rather than at the very top — easier to read a
+    /// search hit in its surrounding context. Deferred to
+    /// <see cref="DispatcherPriority.Loaded"/> so it runs after a freshly
+    /// opened document has been measured (a synchronous scroll would clamp to
+    /// 0) and after any tab-restore scroll, which it must override.
+    /// </summary>
+    private void ScrollLineToCenter(int lineNumber)
+    {
+        // Ensure the line's visual is generated so its top can be measured.
+        Editor.ScrollToLine(lineNumber);
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (Editor.Document is null) return;
+            var textView = Editor.TextArea.TextView;
+            double visualTop = textView.GetVisualTopByDocumentLine(lineNumber);
+            double target = visualTop - (Editor.ViewportHeight - textView.DefaultLineHeight) / 2;
+            Editor.ScrollToVerticalOffset(Math.Max(0, target));
+        }, DispatcherPriority.Loaded);
     }
 
     private void OnToggleWordWrap(object sender, RoutedEventArgs e)
@@ -2434,15 +2793,24 @@ public partial class MainWindow : Window
     {
         bool ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
         bool shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
+        bool alt = Keyboard.Modifiers.HasFlag(ModifierKeys.Alt);
+        // With Alt held, WPF reports the real key in SystemKey, not Key.
+        Key key = e.Key == Key.System ? e.SystemKey : e.Key;
 
-        switch (e.Key)
+        switch (key)
         {
+            case Key.R when shift && alt:
+                RevealCurrentContext(); e.Handled = true; break;
+            case Key.C when shift && alt:
+                CopyPathCurrentContext(); e.Handled = true; break;
             case Key.S when ctrl && shift:
                 SaveAllDirty(silent: false); e.Handled = true; break;
             case Key.S when ctrl:
                 OnSave(sender, e); e.Handled = true; break;
             case Key.N when ctrl:
                 OnNewFile(sender, e); e.Handled = true; break;
+            case Key.O when ctrl:
+                OnOpenFile(sender, e); e.Handled = true; break;
             case Key.P when ctrl:
                 OnQuickOpen(); e.Handled = true; break;
             case Key.W when ctrl && shift:
@@ -2505,6 +2873,7 @@ public partial class MainWindow : Window
 
     private static Shortcut[] BuildCheatsheet() =>
     [
+        new("Ctrl+O", "Open a file (OS dialog)"),
         new("Ctrl+P", "Quick-open a file"),
         new("Ctrl+S", "Save  ·  Ctrl+Shift+S  save all"),
         new("Ctrl+N", "New file"),
@@ -2516,6 +2885,8 @@ public partial class MainWindow : Window
         new("Ctrl+Shift+R", "Replace in files  ·  Ctrl+Enter to commit"),
         new("Ctrl+Shift+T", "Show the file tree"),
         new("F2", "Rename current file"),
+        new("Shift+Alt+R", "Reveal in Explorer"),
+        new("Shift+Alt+C", "Copy full path"),
         new("F3", "Find next  ·  Shift+F3  find previous"),
         new("Ctrl+M", "Cycle markdown mode"),
         new("Ctrl+T", "Focus the file tree"),

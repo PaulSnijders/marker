@@ -20,6 +20,21 @@ public sealed class Workspace
     public List<string> OpenFiles { get; set; } = new();
 
     /// <summary>
+    /// Path of the tab that was selected when this workspace was last active,
+    /// or <c>null</c> when nothing eligible was selected. Re-selected on the
+    /// next visit so the user lands on the file they were last working in.
+    /// </summary>
+    public string? LastActiveFile { get; set; }
+
+    /// <summary>
+    /// Per-file caret and scroll snapshot keyed by absolute path, so reopening
+    /// the workspace puts each tab back on the line it was scrolled to instead
+    /// of resetting to the top. Path keys are compared case-insensitively
+    /// (rebuilt with <see cref="StringComparer.OrdinalIgnoreCase"/> after load).
+    /// </summary>
+    public Dictionary<string, FilePositionState> FilePositions { get; set; } = new();
+
+    /// <summary>
     /// Absolute paths of every directory that was expanded in the tree when
     /// this workspace was last active, so the tree restores to the same
     /// open/closed shape on the next visit. Empty for a brand-new workspace —
