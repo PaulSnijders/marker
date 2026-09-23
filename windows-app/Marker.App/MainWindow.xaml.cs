@@ -2947,6 +2947,21 @@ public partial class MainWindow : Window
   table { border-collapse: collapse; }
   th, td { border: 1px solid {{BORDER}}; padding: 6px 12px; }
   img { max-width: 100%; }
+  .frontmatter {
+    background: {{CODEBG}}; border: 1px solid {{BORDER}}; border-radius: 6px;
+    padding: 10px 16px; margin-bottom: 24px; font-size: .9em;
+  }
+  .frontmatter table { border-collapse: collapse; width: 100%; }
+  .frontmatter th, .frontmatter td {
+    border: none; padding: 4px 8px; vertical-align: top; text-align: left;
+  }
+  .frontmatter th { color: #888; font-weight: 600; white-space: nowrap; width: 1%; }
+  .frontmatter .fm-text { white-space: pre-wrap; }
+  .frontmatter pre { margin: 0; padding: 0; background: none; }
+  .fm-tag {
+    display: inline-block; padding: 0 8px; margin: 1px 4px 1px 0;
+    border: 1px solid {{BORDER}}; border-radius: 10px; background: {{BG}};
+  }
 </style>
 </head>
 <body>

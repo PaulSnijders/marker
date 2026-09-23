@@ -12,5 +12,9 @@ public sealed class MarkdigRenderer : IMarkdownRenderer
         .Build();
 
     public string RenderToHtmlFragment(string markdown)
-        => Markdig.Markdown.ToHtml(markdown ?? string.Empty, _pipeline);
+    {
+        var (yaml, body) = FrontMatter.Split(markdown ?? string.Empty);
+        string html = Markdig.Markdown.ToHtml(body, _pipeline);
+        return yaml is null ? html : FrontMatter.ToHtml(yaml) + html;
+    }
 }
