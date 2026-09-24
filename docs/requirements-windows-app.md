@@ -43,7 +43,15 @@ note-taking and casual editing of text files. Built with WPF + AvalonEdit on
 - Shift+Alt+R reveals the selected node in Explorer; Shift+Alt+C copies its
   full path (both are context-aware — they act on the focused tree node, or on
   the current tab when the editor has focus).
-- Auto-refreshes when files change outside the app.
+- Entries sort like Explorer: folders first, then files, in natural order
+  (case-insensitive, numbers compared by value).
+- Long runs of numbered or dated files (names starting with digits, optionally one letter, then `-`; e.g.
+  `0042-…`, `0007B-…` or `2026-09-23-…`): when a folder has more than 20, only the last
+  10 are shown. The rest collapse into one `(....)` node (one dot per hidden
+  file, capped). Clicking it (or Enter) shows them all until the folder is
+  collapsed or the workspace is switched. Other files are unaffected.
+- Auto-refreshes when files change outside the app; F5 in the tree (or
+  Workspace ▸ Refresh Tree) re-reads it from disk.
 - Configurable ignore patterns (default: `.git`, `node_modules`, `bin`, `obj`).
 - Drag & drop from Windows Explorer: files open as tabs, folders are added to
   the active workspace.

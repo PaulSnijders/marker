@@ -1,13 +1,17 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Marker.App.Services;
+using Marker.Core.FileSystem;
 
 namespace Marker.App.ViewModels;
 
 /// <summary>
 /// A node in the workspace file tree. Directories load their children lazily
 /// on first expansion to keep large folders fast.
+/// A long run of numbered or dated files ("0001-…", "2026-09-23-…") is trimmed
+/// to its last few, with a clickable "(....)" node standing in for the rest.
 /// </summary>
 public sealed partial class FileSystemNodeViewModel : ObservableObject
 {
@@ -20,9 +24,23 @@ public sealed partial class FileSystemNodeViewModel : ObservableObject
     public bool IsWorkspaceRoot { get; }
     public bool IsPlaceholder { get; }
 
+    /// <summary>The "(....)" node standing in for hidden numbered files.</summary>
+    public bool IsHiddenGroup { get; }
+    public string? ToolTip { get; }
+
     public ObservableCollection<FileSystemNodeViewModel> Children { get; } = new();
 
     private bool _loaded;
+
+    // More than GroupThreshold files matching NumberedName → only the last
+    // GroupKeep are shown until the user clicks the "(....)" node.
+    private const int GroupThreshold = 20;
+    private const int GroupKeep = 10;
+    private const int MaxGroupDots = 20;
+    private static readonly Regex NumberedName = new(@"^\d+[A-Za-z]?-", RegexOptions.Compiled);
+
+    private bool _showAllNumbered;
+    private readonly FileSystemNodeViewModel? _owner;   // hidden group → its directory
 
     /// <summary>Real file/directory node.</summary>
     public FileSystemNodeViewModel(string path, bool isDirectory, bool isWorkspaceRoot = false)
@@ -45,14 +63,25 @@ public sealed partial class FileSystemNodeViewModel : ObservableObject
         IsPlaceholder = true;
     }
 
+    /// <summary>Hidden-group constructor. Also a placeholder, so the file actions skip it.</summary>
+    private FileSystemNodeViewModel(FileSystemNodeViewModel owner, int hiddenCount)
+    {
+        Path = string.Empty;
+        _name = "(" + new string('.', Math.Min(hiddenCount, MaxGroupDots)) + ")";
+        ToolTip = $"{hiddenCount} older files hidden — click to show";
+        IsPlaceholder = true;
+        IsHiddenGroup = true;
+        _owner = owner;
+    }
+
     private static FileSystemNodeViewModel CreatePlaceholder() => new();
 
     // --- icon ---------------------------------------------------------
 
     /// <summary>Segoe MDL2 glyph; folders vs. files, no heavy icon theme.</summary>
-    public string Glyph => IsDirectory ? "" : ""; // Folder / Document
+    public string Glyph => IsHiddenGroup ? "" : IsDirectory ? "" : ""; // ChevronDown / Folder / Document
 
-    public string GlyphColor => IsDirectory ? "#E3B341" : ExtensionColor();
+    public string GlyphColor => IsHiddenGroup ? "#8C8C8C" : IsDirectory ? "#E3B341" : ExtensionColor();
 
     private string ExtensionColor() => System.IO.Path.GetExtension(Path).ToLowerInvariant() switch
     {
@@ -68,8 +97,56 @@ public sealed partial class FileSystemNodeViewModel : ObservableObject
 
     partial void OnIsExpandedChanged(bool value)
     {
-        if (value && IsDirectory && !_loaded)
+        if (!IsDirectory)
+            return;
+
+        if (!value)
+            _showAllNumbered = false;   // re-trim on the next expand
+        else if (!_loaded)
             LoadChildren();
+        else
+            Refresh();                  // collapsed folders aren't watched, catch up now
+    }
+
+    /// <summary>
+    /// Reveals the files behind this hidden-group node. Returns the node that
+    /// now sits where the group was (the first revealed file), for selection.
+    /// </summary>
+    public FileSystemNodeViewModel? ExpandHiddenGroup()
+    {
+        if (_owner is null)
+            return null;
+        int index = _owner.Children.IndexOf(this);
+        _owner._showAllNumbered = true;
+        _owner.Refresh();
+        return index >= 0 && index < _owner.Children.Count ? _owner.Children[index] : null;
+    }
+
+    /// <summary>
+    /// The directory listing as shown: ignored entries dropped and, unless
+    /// expanded, all but the last numbered files replaced by one null entry
+    /// marking where the hidden group goes.
+    /// </summary>
+    private List<FileSystemEntry?> VisibleEntries(out int hiddenCount)
+    {
+        var entries = AppServices.Files.List(Path)
+            .Where(e => !IsIgnored(e.Name))
+            .ToList<FileSystemEntry?>();
+
+        hiddenCount = 0;
+        if (_showAllNumbered)
+            return entries;
+
+        var numbered = entries.Where(e => !e!.IsDirectory && NumberedName.IsMatch(e.Name)).ToList();
+        if (numbered.Count <= GroupThreshold)
+            return entries;
+
+        var hidden = numbered.Take(numbered.Count - GroupKeep).ToHashSet();
+        hiddenCount = hidden.Count;
+        int groupIndex = entries.IndexOf(numbered[0]);
+        entries.RemoveAll(hidden.Contains);
+        entries.Insert(groupIndex, null);
+        return entries;
     }
 
     /// <summary>Lists this directory and builds child nodes (one level deep).</summary>
@@ -81,11 +158,11 @@ public sealed partial class FileSystemNodeViewModel : ObservableObject
         if (!IsDirectory || !AppServices.Files.DirectoryExists(Path))
             return;
 
-        foreach (var entry in AppServices.Files.List(Path))
+        foreach (var entry in VisibleEntries(out int hiddenCount))
         {
-            if (IsIgnored(entry.Name))
-                continue;
-            Children.Add(new FileSystemNodeViewModel(entry.Path, entry.IsDirectory));
+            Children.Add(entry is null
+                ? new FileSystemNodeViewModel(this, hiddenCount)
+                : new FileSystemNodeViewModel(entry.Path, entry.IsDirectory));
         }
     }
 
@@ -106,15 +183,15 @@ public sealed partial class FileSystemNodeViewModel : ObservableObject
             return;
         }
 
-        var current = AppServices.Files.List(Path)
-            .Where(e => !IsIgnored(e.Name))
-            .ToList();
-        var currentPaths = current.Select(e => e.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var current = VisibleEntries(out int hiddenCount);
+        var currentPaths = current.OfType<FileSystemEntry>()
+            .Select(e => e.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        // Drop nodes that disappeared.
+        // Drop nodes that disappeared (or got hidden); the group is rebuilt below.
         for (int i = Children.Count - 1; i >= 0; i--)
         {
-            if (!Children[i].IsPlaceholder && !currentPaths.Contains(Children[i].Path))
+            if (Children[i].IsHiddenGroup ||
+                (!Children[i].IsPlaceholder && !currentPaths.Contains(Children[i].Path)))
                 Children.RemoveAt(i);
         }
 
@@ -125,6 +202,11 @@ public sealed partial class FileSystemNodeViewModel : ObservableObject
         for (int i = 0; i < current.Count; i++)
         {
             var entry = current[i];
+            if (entry is null)
+            {
+                Children.Insert(i, new FileSystemNodeViewModel(this, hiddenCount));
+                continue;
+            }
             if (existing.TryGetValue(entry.Path, out var node))
             {
                 if (node.IsDirectory && node.IsExpanded)

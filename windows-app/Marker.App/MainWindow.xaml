@@ -25,7 +25,7 @@
         <!-- File tree node template -->
         <HierarchicalDataTemplate DataType="{x:Type vm:FileSystemNodeViewModel}"
                                   ItemsSource="{Binding Children}">
-            <StackPanel Orientation="Horizontal" Margin="0,1">
+            <StackPanel Orientation="Horizontal" Margin="0,1" ToolTip="{Binding ToolTip}">
                 <TextBlock Text="{Binding Glyph}"
                            FontFamily="Segoe MDL2 Assets"
                            FontSize="13"
@@ -187,7 +187,7 @@
                 <Separator />
                 <MenuItem Header="Add Folder…" Click="OnAddWorkspace" />
                 <MenuItem Header="Remove Selected Folder" Click="OnRemoveFolder" />
-                <MenuItem Header="Refresh Tree" Click="OnRefreshTree" />
+                <MenuItem Header="Refresh Tree" InputGestureText="F5" Click="OnRefreshTree" />
             </MenuItem>
             <MenuItem Header="_Help">
                 <MenuItem Header="Keyboard Shortcuts" InputGestureText="Esc"

@@ -17,14 +17,15 @@ public sealed class LocalFileRepository : IFileRepository
 
     public IEnumerable<FileSystemEntry> List(string directoryPath)
     {
-        // Directories first, then files; both alphabetical, case-insensitive.
+        // Directories first, then files; both in Explorer's natural order
+        // (case-insensitive, digit runs compared as numbers: 9 before 10).
         var dirs = Directory.EnumerateDirectories(directoryPath)
             .Select(p => new FileSystemEntry(p, Path.GetFileName(p), true))
-            .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase);
+            .OrderBy(e => e.Name, NaturalComparer.Instance);
 
         var files = Directory.EnumerateFiles(directoryPath)
             .Select(p => new FileSystemEntry(p, Path.GetFileName(p), false))
-            .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase);
+            .OrderBy(e => e.Name, NaturalComparer.Instance);
 
         return dirs.Concat(files).ToList();
     }

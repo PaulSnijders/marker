@@ -920,10 +920,26 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// Keyboard actions inside the file tree: Enter/Space opens a file (or
-    /// expands a folder); Right on a file opens a transient "sneak-peek" tab.
+    /// expands a folder); Right on a file opens a transient "sneak-peek" tab;
+    /// F5 re-reads the tree from disk.
     /// </summary>
     private void OnTreeKeyDown(object sender, KeyEventArgs e)
     {
+        if (e.Key == Key.F5)
+        {
+            RefreshTree();
+            e.Handled = true;
+            return;
+        }
+
+        if (_vm.SelectedNode is { IsHiddenGroup: true } group
+            && e.Key is Key.Enter or Key.Space)
+        {
+            ExpandHiddenGroup(group);
+            e.Handled = true;
+            return;
+        }
+
         if (_vm.SelectedNode is not { IsPlaceholder: false } node)
             return;
 
@@ -977,8 +993,16 @@ public partial class MainWindow : Window
         // expander arrow are handled by the ToggleButton itself (it marks the
         // event handled), so this only fires for clicks on the item row.
         if (sender is not TreeViewItem item ||
-            item.DataContext is not FileSystemNodeViewModel node ||
-            node.IsPlaceholder)
+            item.DataContext is not FileSystemNodeViewModel node)
+            return;
+
+        if (node.IsHiddenGroup)
+        {
+            ExpandHiddenGroup(node);
+            e.Handled = true;
+            return;
+        }
+        if (node.IsPlaceholder)
             return;
 
         if (node.IsDirectory)
@@ -987,6 +1011,13 @@ public partial class MainWindow : Window
             OpenFile(node.Path);
 
         e.Handled = true;
+    }
+
+    /// <summary>Shows the files behind a "(....)" node and selects the first of them.</summary>
+    private void ExpandHiddenGroup(FileSystemNodeViewModel group)
+    {
+        if (group.ExpandHiddenGroup() is { } first)
+            first.IsSelected = true;
     }
 
     private void OnTreeItemRightClick(object sender, MouseButtonEventArgs e)
