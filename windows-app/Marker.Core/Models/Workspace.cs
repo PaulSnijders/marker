@@ -20,6 +20,13 @@ public sealed class Workspace
     public List<string> OpenFiles { get; set; } = new();
 
     /// <summary>
+    /// Subset of <see cref="OpenFiles"/> that was never edited, oldest first.
+    /// These stay eligible for auto-closing after a reopen. Tabs not listed
+    /// here (including every tab of an older workspace file) count as edited.
+    /// </summary>
+    public List<string> UneditedFiles { get; set; } = new();
+
+    /// <summary>
     /// Path of the tab that was selected when this workspace was last active,
     /// or <c>null</c> when nothing eligible was selected. Re-selected on the
     /// next visit so the user lands on the file they were last working in.

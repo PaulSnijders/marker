@@ -39,6 +39,16 @@ public sealed partial class EditorTabViewModel : ObservableObject
     /// </summary>
     [ObservableProperty] private bool _isPreview;
     [ObservableProperty] private int _caretLine = 1;
+
+    /// <summary>
+    /// True once the text has ever been changed in this tab (saved or not).
+    /// Tabs that were never edited are candidates for auto-closing when too
+    /// many of them pile up; edited tabs are never closed automatically.
+    /// </summary>
+    public bool HasEdits { get; set; }
+
+    /// <summary>Monotonic open order — the lowest value is the oldest tab.</summary>
+    public long OpenedOrder { get; set; }
     [ObservableProperty] private int _caretColumn = 1;
 
     /// <summary>
@@ -83,7 +93,7 @@ public sealed partial class EditorTabViewModel : ObservableObject
 
         Document = new TextDocument(content.IsBinary ? string.Empty : content.Text);
         // Subscribe after construction so the initial load is not "dirty".
-        Document.TextChanged += (_, _) => IsDirty = true;
+        Document.TextChanged += (_, _) => { IsDirty = true; HasEdits = true; };
     }
 
     /// <summary>Packages the current text with the file's original encoding for saving.</summary>
@@ -111,8 +121,10 @@ public sealed partial class EditorTabViewModel : ObservableObject
     /// </summary>
     public void ReloadFrom(TextFileContent fresh)
     {
+        bool hadEdits = HasEdits;       // an external reload is not a user edit
         _origin = fresh;
         Document.Text = fresh.Text;
         IsDirty = false;
+        HasEdits = hadEdits;
     }
 }

@@ -62,6 +62,10 @@ note-taking and casual editing of text files. Built with WPF + AvalonEdit on
   per tab, middle-click to close, Ctrl+Tab to cycle, Ctrl+1…9 to jump to a
   tab. Right-click a tab: close / close others / close all, reveal in
   Explorer, copy full path.
+- Auto-close of browsed files: at most 3 never-edited tabs stay open. Opening
+  another file closes the oldest never-edited tab. A tab that was ever edited
+  is never closed automatically (remembered per workspace). The scratchpad
+  and help tab don't count.
 - Open File (Ctrl+O): the standard OS file picker (multi-select), for opening
   one-off files that live outside any workspace folder.
 - Quick Open (Ctrl+P): a type-to-find file picker over the active workspace,

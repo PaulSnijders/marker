@@ -49,6 +49,8 @@ public partial class MainWindow : Window
     private bool _suppressWorkspaceSelection;    // ignore ComboBox events we caused
 
     private EditorTabViewModel? _previewTab;     // current sneak-peek tab, if any
+    private long _tabOpenCounter;                // source of EditorTabViewModel.OpenedOrder
+    private bool _reopeningFiles;                // restoring a workspace — no auto-close
     private bool _suppressEditorFocus;           // skip auto-focusing the editor once
 
     private ICSharpCode.AvalonEdit.Search.SearchPanel? _searchPanel; // installed once; keeps SearchPattern across Close/Open
@@ -613,6 +615,11 @@ public partial class MainWindow : Window
             .Where(t => !t.IsPreview && !IsHelpFile(t.FilePath))
             .Select(t => t.FilePath)
             .ToList();
+        _activeWorkspace.UneditedFiles = _vm.Tabs
+            .Where(t => !t.IsPreview && !IsHelpFile(t.FilePath) && !t.HasEdits)
+            .OrderBy(t => t.OpenedOrder)
+            .Select(t => t.FilePath)
+            .ToList();
 
         var sel = _vm.SelectedTab;
         _activeWorkspace.LastActiveFile =
@@ -1114,7 +1121,10 @@ public partial class MainWindow : Window
         if (existing is not null)
         {
             if (!preview && existing.IsPreview)
+            {
                 PromotePreview(existing);          // a normal open pins the peek
+                CloseSurplusUneditedTabs(existing);
+            }
             if (preview && !ReferenceEquals(existing, _vm.SelectedTab))
                 _suppressEditorFocus = true;       // a peek keeps focus in the tree
             _vm.SelectedTab = existing;
@@ -1135,7 +1145,10 @@ public partial class MainWindow : Window
                 : AppServices.Files.ReadText(path);
             var mode = InitialModeFor(path, type);
 
-            var tab = new EditorTabViewModel(path, content, type, mode);
+            var tab = new EditorTabViewModel(path, content, type, mode)
+            {
+                OpenedOrder = ++_tabOpenCounter
+            };
             if (IsScratchpadFile(path))
                 tab.Title = "Scratchpad";   // friendly name, not the keyed file name
             else if (IsHelpFile(path))
@@ -1154,6 +1167,7 @@ public partial class MainWindow : Window
 
             if (preview)
                 return;                     // sneak-peeks are never recorded
+            CloseSurplusUneditedTabs(tab);
             if (IsScratchpadFile(path))
                 SaveSettingsNow();          // persist the open-files list
             else if (!IsHelpFile(path))
@@ -1166,10 +1180,41 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// How many never-edited tabs may stay open. Opening one more closes the
+    /// oldest of them, so clicking through files doesn't pile up tabs.
+    /// </summary>
+    private const int MaxUneditedTabs = 3;
+
+    /// <summary>
+    /// Closes the oldest never-edited tabs until at most
+    /// <see cref="MaxUneditedTabs"/> remain. Tabs that were ever edited, the
+    /// sneak-peek, the scratchpad, the help tab and <paramref name="keep"/>
+    /// (the file just opened) are never closed here.
+    /// </summary>
+    private void CloseSurplusUneditedTabs(EditorTabViewModel keep)
+    {
+        if (_reopeningFiles)
+            return;
+
+        var unedited = _vm.Tabs
+            .Where(t => !t.HasEdits && !t.IsDirty && !t.IsPreview &&
+                        !IsScratchpadFile(t.FilePath) && !IsHelpFile(t.FilePath))
+            .ToList();
+        var closable = unedited
+            .Where(t => !ReferenceEquals(t, keep))
+            .OrderBy(t => t.OpenedOrder)
+            .Take(unedited.Count - MaxUneditedTabs)
+            .ToList();
+        foreach (var t in closable)
+            CloseTab(t);
+    }
+
     /// <summary>Turns a sneak-peek tab into a permanent one.</summary>
     private void PromotePreview(EditorTabViewModel tab)
     {
         tab.IsPreview = false;
+        tab.OpenedOrder = ++_tabOpenCounter;   // "opened" as of now
         if (ReferenceEquals(tab, _previewTab))
             _previewTab = null;
         AddRecentFile(tab.FilePath);        // (also persists settings)
@@ -1362,30 +1407,40 @@ public partial class MainWindow : Window
     private void ReopenFiles(Workspace ws)
     {
         EditorTabViewModel? lastActive = null;
+        var unedited = new HashSet<string>(ws.UneditedFiles, StringComparer.OrdinalIgnoreCase);
 
-        foreach (string path in ws.OpenFiles.ToList())
+        _reopeningFiles = true;
+        try
         {
-            if (!File.Exists(path)) continue;
-            OpenFile(path);
-
-            // OpenFile creates and selects the tab; find it back so we can
-            // seed its remembered caret + scroll before it becomes visible.
-            var tab = _vm.Tabs.LastOrDefault(
-                t => string.Equals(t.FilePath, path, StringComparison.OrdinalIgnoreCase));
-            if (tab is null) continue;
-
-            if (ws.FilePositions.TryGetValue(path, out var pos))
+            foreach (string path in ws.OpenFiles.ToList())
             {
-                tab.CaretLine = pos.CaretLine;
-                tab.CaretColumn = pos.CaretColumn;
-                tab.VerticalOffset = pos.VerticalOffset;
-                tab.HorizontalOffset = pos.HorizontalOffset;
-            }
+                if (!File.Exists(path)) continue;
+                OpenFile(path);
 
-            if (ws.LastActiveFile is { } target &&
-                string.Equals(target, path, StringComparison.OrdinalIgnoreCase))
-                lastActive = tab;
+                // OpenFile creates and selects the tab; find it back so we can
+                // seed its remembered caret + scroll before it becomes visible.
+                var tab = _vm.Tabs.LastOrDefault(
+                    t => string.Equals(t.FilePath, path, StringComparison.OrdinalIgnoreCase));
+                if (tab is null) continue;
+
+                // Tabs not recorded as unedited count as edited, so an older
+                // workspace file never loses tabs to auto-close.
+                tab.HasEdits = !unedited.Contains(path);
+
+                if (ws.FilePositions.TryGetValue(path, out var pos))
+                {
+                    tab.CaretLine = pos.CaretLine;
+                    tab.CaretColumn = pos.CaretColumn;
+                    tab.VerticalOffset = pos.VerticalOffset;
+                    tab.HorizontalOffset = pos.HorizontalOffset;
+                }
+
+                if (ws.LastActiveFile is { } target &&
+                    string.Equals(target, path, StringComparison.OrdinalIgnoreCase))
+                    lastActive = tab;
+            }
         }
+        finally { _reopeningFiles = false; }
 
         // Pick the saved last-active tab. Fall back to the first persisted
         // tab when the saved file is gone or this is an older workspace.
