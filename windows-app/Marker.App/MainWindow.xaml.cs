@@ -345,6 +345,7 @@ public partial class MainWindow : Window
         Web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
         Web.WebMessageReceived += OnWebMessageReceived;
         Web.CoreWebView2.NavigationStarting += OnWebNavigationStarting;
+        Web.CoreWebView2.NewWindowRequested += OnWebNewWindowRequested;
         _webReady = true;
     }
 
@@ -2107,7 +2108,23 @@ public partial class MainWindow : Window
             return;
 
         e.Cancel = true;
+        RouteWebUri(uri);
+    }
 
+    /// <summary>
+    /// A file dropped from Explorer onto the WebView (read/rich mode) would
+    /// otherwise open in a separate browser window; route it like a link so it
+    /// opens as a tab in Marker instead.
+    /// </summary>
+    private void OnWebNewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs e)
+    {
+        e.Handled = true;
+        if (!string.IsNullOrEmpty(e.Uri))
+            RouteWebUri(e.Uri);
+    }
+
+    private void RouteWebUri(string uri)
+    {
         if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed))
             return;
 
