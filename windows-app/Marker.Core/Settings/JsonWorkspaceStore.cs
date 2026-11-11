@@ -44,6 +44,8 @@ public sealed class JsonWorkspaceStore : IWorkspaceStore
                     // paths compare that way and the in-memory lookup relies on it.
                     ws.FilePositions = new Dictionary<string, FilePositionState>(
                         ws.FilePositions, StringComparer.OrdinalIgnoreCase);
+                    ws.FileModes = new Dictionary<string, ViewMode>(
+                        ws.FileModes, StringComparer.OrdinalIgnoreCase);
                     result.Add(ws);
                 }
             }

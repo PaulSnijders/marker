@@ -13,30 +13,35 @@ public sealed class FileTypeRegistry : IFileTypeRegistry
     // or custom ones loaded from Assets/Syntax (*.xshd).
     private static readonly Dictionary<string, FileTypeInfo> Map = new(StringComparer.OrdinalIgnoreCase)
     {
-        [".md"]       = new("Markdown", "Markdown", IsMarkdown: true),
-        [".markdown"] = new("Markdown", "Markdown", IsMarkdown: true),
-        [".txt"]      = new("Plain Text", null, IsMarkdown: false),
-        [".json"]     = new("JSON", "JSON", IsMarkdown: false),
-        [".xml"]      = new("XML", "XML", IsMarkdown: false),
-        [".html"]     = new("HTML", "HTML", IsMarkdown: false),
-        [".htm"]      = new("HTML", "HTML", IsMarkdown: false),
-        [".yaml"]     = new("YAML", "YAML", IsMarkdown: false),
-        [".yml"]      = new("YAML", "YAML", IsMarkdown: false),
-        [".csv"]      = new("CSV", null, IsMarkdown: false),
-        [".log"]      = new("Log", null, IsMarkdown: false),
+        [".md"]       = new("Markdown", "Markdown", FileView.Markdown),
+        [".markdown"] = new("Markdown", "Markdown", FileView.Markdown),
+        [".txt"]      = new("Plain Text", null),
+        [".json"]     = new("JSON", "JSON"),
+        [".xml"]      = new("XML", "XML"),
+        [".html"]     = new("HTML", "HTML"),
+        [".htm"]      = new("HTML", "HTML"),
+        [".yaml"]     = new("YAML", "YAML"),
+        [".yml"]      = new("YAML", "YAML"),
+        [".csv"]      = new("CSV", null, FileView.Table),
+        [".tsv"]      = new("TSV", null, FileView.Table),
+        [".log"]      = new("Log", null),
+        [".sql"]      = new("SQL", "SQL"),
 
         // Images — shown inline in a dedicated host instead of the text editor.
         // .svg is intentionally absent: it stays text/binary (it's XML).
-        [".png"]      = new("PNG image",  null, IsMarkdown: false, IsImage: true),
-        [".jpg"]      = new("JPEG image", null, IsMarkdown: false, IsImage: true),
-        [".jpeg"]     = new("JPEG image", null, IsMarkdown: false, IsImage: true),
-        [".gif"]      = new("GIF image",  null, IsMarkdown: false, IsImage: true),
-        [".bmp"]      = new("Bitmap",     null, IsMarkdown: false, IsImage: true),
-        [".webp"]     = new("WebP image", null, IsMarkdown: false, IsImage: true),
-        [".ico"]      = new("Icon",       null, IsMarkdown: false, IsImage: true),
+        [".png"]      = new("PNG image",  null, FileView.Image),
+        [".jpg"]      = new("JPEG image", null, FileView.Image),
+        [".jpeg"]     = new("JPEG image", null, FileView.Image),
+        [".gif"]      = new("GIF image",  null, FileView.Image),
+        [".bmp"]      = new("Bitmap",     null, FileView.Image),
+        [".webp"]     = new("WebP image", null, FileView.Image),
+        [".ico"]      = new("Icon",       null, FileView.Image),
+
+        // Shown by the WebView2's built-in PDF viewer — no extra dependency.
+        [".pdf"]      = new("PDF", null, FileView.Pdf),
     };
 
-    private static readonly FileTypeInfo Unknown = new("Text", null, IsMarkdown: false);
+    private static readonly FileTypeInfo Unknown = new("Text", null);
 
     public FileTypeInfo Resolve(string path)
     {

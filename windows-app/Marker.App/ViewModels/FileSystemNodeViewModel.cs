@@ -49,6 +49,9 @@ public sealed partial class FileSystemNodeViewModel : ObservableObject
         IsDirectory = isDirectory;
         IsWorkspaceRoot = isWorkspaceRoot;
         _name = isWorkspaceRoot ? DescribeRoot(path) : System.IO.Path.GetFileName(path);
+        // Roots show a short name, so hovering reveals where they actually live.
+        if (isWorkspaceRoot)
+            ToolTip = path;
 
         // A lazy directory shows an expander arrow via this dummy child.
         if (IsDirectory)
@@ -90,6 +93,7 @@ public sealed partial class FileSystemNodeViewModel : ObservableObject
         ".xml" or ".html" or ".htm" => "#2AA198",
         ".yaml" or ".yml"    => "#A24B57",
         ".csv" or ".log"     => "#6A9955",
+        ".sql"               => "#B07219",
         _                    => "#8C8C8C",
     };
 

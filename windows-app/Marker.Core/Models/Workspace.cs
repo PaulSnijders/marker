@@ -42,6 +42,13 @@ public sealed class Workspace
     public Dictionary<string, FilePositionState> FilePositions { get; set; } = new();
 
     /// <summary>
+    /// Markdown view mode the user last picked per file, keyed by absolute path
+    /// (case-insensitive after load). Files without an entry open in
+    /// <see cref="AppSettings.DefaultMarkdownMode"/> — the scratchpad in Source.
+    /// </summary>
+    public Dictionary<string, ViewMode> FileModes { get; set; } = new();
+
+    /// <summary>
     /// Absolute paths of every directory that was expanded in the tree when
     /// this workspace was last active, so the tree restores to the same
     /// open/closed shape on the next visit. Empty for a brand-new workspace —

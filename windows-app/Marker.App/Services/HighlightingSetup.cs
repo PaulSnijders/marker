@@ -7,7 +7,7 @@ namespace Marker.App.Services;
 
 /// <summary>
 /// Registers the custom AvalonEdit highlighting definitions (Markdown, JSON,
-/// YAML) shipped as embedded .xshd resources. XML and HTML are already
+/// YAML, SQL) shipped as embedded .xshd resources. XML and HTML are already
 /// built into AvalonEdit, so they need no registration.
 /// </summary>
 public static class HighlightingSetup
@@ -17,6 +17,7 @@ public static class HighlightingSetup
         Register("Markdown", "Assets/Syntax/Markdown.xshd", ".md", ".markdown");
         Register("JSON", "Assets/Syntax/JSON.xshd", ".json");
         Register("YAML", "Assets/Syntax/YAML.xshd", ".yaml", ".yml");
+        Register("SQL", "Assets/Syntax/SQL.xshd", ".sql");
     }
 
     private static void Register(string name, string resourcePath, params string[] extensions)

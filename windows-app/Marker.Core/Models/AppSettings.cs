@@ -18,10 +18,10 @@ public sealed class AppSettings
     public List<string> WorkspaceFolders { get; set; } = new();
 
     // --- Markdown -----------------------------------------------------
-    /// <summary>The view mode for all open markdown files. Switching mode on
-    /// one tab updates this and is propagated to every other markdown tab —
-    /// there is only one mode app-wide.</summary>
-    public MarkdownMode DefaultMarkdownMode { get; set; } = MarkdownMode.Source;
+    /// <summary>The view mode a markdown file opens in the first time. Once the
+    /// user switches a file's mode, the workspace remembers it per file
+    /// (<see cref="Workspace.FileModes"/>). The scratchpad always defaults to Source.</summary>
+    public ViewMode DefaultMarkdownMode { get; set; } = ViewMode.Source;
 
     // --- Editor -------------------------------------------------------
     public bool AutoSave { get; set; } = true;
@@ -57,4 +57,8 @@ public sealed class AppSettings
     public double WindowTop { get; set; } = double.NaN;
     public bool WindowMaximized { get; set; }
     public double TreePaneWidth { get; set; } = 260;
+
+    /// <summary>Whether the sidebar (workspace switcher, tree, find, replace)
+    /// is shown. Hidden gives a distraction-free view of just the file.</summary>
+    public bool ShowSidebar { get; set; } = true;
 }

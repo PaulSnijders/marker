@@ -1,0 +1,101 @@
+<?xml version="1.0"?>
+<SyntaxDefinition name="SQL" extensions=".sql"
+                  xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+
+  <!-- Generic SQL: covers common ANSI, T-SQL and PostgreSQL syntax. -->
+  <Color name="Comment"    foreground="#6A9955" fontStyle="italic" />
+  <Color name="String"     foreground="#A24B57" />
+  <Color name="Number"     foreground="#098658" />
+  <Color name="Keyword"    foreground="#0000FF" fontWeight="bold" />
+  <Color name="Type"       foreground="#2B91AF" />
+  <Color name="Function"   foreground="#B07219" />
+  <Color name="Literal"    foreground="#0000FF" />
+  <Color name="Variable"   foreground="#AF00DB" />
+  <Color name="Identifier" foreground="#3B7DBB" />
+  <Color name="Operator"   foreground="#808080" />
+
+  <RuleSet ignoreCase="true">
+
+    <Span color="Comment">
+      <Begin>--</Begin>
+    </Span>
+    <Span color="Comment" multiline="true">
+      <Begin>/\*</Begin>
+      <End>\*/</End>
+    </Span>
+
+    <!-- 'string' (an escaped '' just closes and reopens: same color); also N'...' and E'...' -->
+    <Span color="String" multiline="true">
+      <Begin>[NnEe]?'</Begin>
+      <End>'</End>
+    </Span>
+
+    <!-- PostgreSQL dollar-quoted body: $$ ... $$ -->
+    <Span color="String" multiline="true">
+      <Begin>\$\$</Begin>
+      <End>\$\$</End>
+    </Span>
+
+    <!-- Quoted identifiers: "name", [name], `name` -->
+    <Span color="Identifier"><Begin>"</Begin><End>"</End></Span>
+    <Span color="Identifier"><Begin>\[</Begin><End>\]</End></Span>
+    <Span color="Identifier"><Begin>`</Begin><End>`</End></Span>
+
+    <!-- Variables / parameters: @var, @@rowcount, :param, $1 -->
+    <Rule color="Variable">@@?\w+|(?&lt;!:):\w+|\$[0-9]+</Rule>
+
+    <Keywords color="Literal">
+      <Word>NULL</Word><Word>TRUE</Word><Word>FALSE</Word>
+    </Keywords>
+
+    <Keywords color="Keyword">
+      <Word>SELECT</Word><Word>FROM</Word><Word>WHERE</Word><Word>AND</Word><Word>OR</Word><Word>NOT</Word>
+      <Word>INSERT</Word><Word>INTO</Word><Word>VALUES</Word><Word>UPDATE</Word><Word>SET</Word><Word>DELETE</Word>
+      <Word>MERGE</Word><Word>UPSERT</Word><Word>RETURNING</Word><Word>OUTPUT</Word>
+      <Word>JOIN</Word><Word>INNER</Word><Word>LEFT</Word><Word>RIGHT</Word><Word>FULL</Word><Word>OUTER</Word>
+      <Word>CROSS</Word><Word>APPLY</Word><Word>LATERAL</Word><Word>NATURAL</Word><Word>ON</Word><Word>USING</Word>
+      <Word>GROUP</Word><Word>BY</Word><Word>ORDER</Word><Word>HAVING</Word><Word>ASC</Word><Word>DESC</Word>
+      <Word>NULLS</Word><Word>FIRST</Word><Word>LAST</Word>
+      <Word>LIMIT</Word><Word>OFFSET</Word><Word>FETCH</Word><Word>NEXT</Word><Word>ROWS</Word><Word>ROW</Word>
+      <Word>ONLY</Word><Word>TOP</Word><Word>PERCENT</Word><Word>DISTINCT</Word><Word>ALL</Word><Word>AS</Word>
+      <Word>UNION</Word><Word>INTERSECT</Word><Word>EXCEPT</Word><Word>WITH</Word><Word>RECURSIVE</Word>
+      <Word>IN</Word><Word>IS</Word><Word>LIKE</Word><Word>ILIKE</Word><Word>BETWEEN</Word><Word>EXISTS</Word>
+      <Word>ANY</Word><Word>SOME</Word><Word>CASE</Word><Word>WHEN</Word><Word>THEN</Word><Word>ELSE</Word><Word>END</Word>
+      <Word>OVER</Word><Word>PARTITION</Word><Word>WINDOW</Word><Word>FILTER</Word><Word>WITHIN</Word>
+      <Word>CREATE</Word><Word>ALTER</Word><Word>DROP</Word><Word>TRUNCATE</Word><Word>RENAME</Word>
+      <Word>TABLE</Word><Word>VIEW</Word><Word>INDEX</Word><Word>UNIQUE</Word><Word>SEQUENCE</Word><Word>SCHEMA</Word>
+      <Word>DATABASE</Word><Word>FUNCTION</Word><Word>PROCEDURE</Word><Word>PROC</Word><Word>TRIGGER</Word>
+      <Word>TYPE</Word><Word>EXTENSION</Word><Word>MATERIALIZED</Word><Word>TEMP</Word><Word>TEMPORARY</Word>
+      <Word>PRIMARY</Word><Word>FOREIGN</Word><Word>KEY</Word><Word>REFERENCES</Word><Word>CONSTRAINT</Word>
+      <Word>CHECK</Word><Word>DEFAULT</Word><Word>IDENTITY</Word><Word>GENERATED</Word><Word>ALWAYS</Word>
+      <Word>CASCADE</Word><Word>RESTRICT</Word><Word>COLUMN</Word><Word>ADD</Word><Word>IF</Word>
+      <Word>REPLACE</Word><Word>RETURNS</Word><Word>RETURN</Word><Word>LANGUAGE</Word>
+      <Word>BEGIN</Word><Word>COMMIT</Word><Word>ROLLBACK</Word><Word>TRANSACTION</Word><Word>TRAN</Word>
+      <Word>SAVEPOINT</Word><Word>DECLARE</Word><Word>EXEC</Word><Word>EXECUTE</Word><Word>GO</Word>
+      <Word>WHILE</Word><Word>LOOP</Word><Word>FOR</Word><Word>EACH</Word><Word>DO</Word><Word>BREAK</Word>
+      <Word>CONTINUE</Word><Word>RAISE</Word><Word>THROW</Word><Word>TRY</Word><Word>CATCH</Word><Word>PRINT</Word>
+      <Word>GRANT</Word><Word>REVOKE</Word><Word>TO</Word><Word>USE</Word><Word>EXPLAIN</Word><Word>ANALYZE</Word>
+      <Word>VACUUM</Word><Word>CONFLICT</Word><Word>NOTHING</Word><Word>MATCHED</Word><Word>TARGET</Word><Word>SOURCE</Word>
+      <Word>NOCOUNT</Word><Word>OF</Word><Word>BEFORE</Word><Word>AFTER</Word><Word>INSTEAD</Word>
+    </Keywords>
+
+    <Keywords color="Type">
+      <Word>INT</Word><Word>INTEGER</Word><Word>BIGINT</Word><Word>SMALLINT</Word><Word>TINYINT</Word>
+      <Word>SERIAL</Word><Word>BIGSERIAL</Word><Word>DECIMAL</Word><Word>NUMERIC</Word><Word>REAL</Word>
+      <Word>FLOAT</Word><Word>DOUBLE</Word><Word>PRECISION</Word><Word>MONEY</Word><Word>BIT</Word><Word>BOOLEAN</Word><Word>BOOL</Word>
+      <Word>CHAR</Word><Word>VARCHAR</Word><Word>NCHAR</Word><Word>NVARCHAR</Word><Word>TEXT</Word><Word>NTEXT</Word>
+      <Word>CHARACTER</Word><Word>VARYING</Word><Word>UUID</Word><Word>UNIQUEIDENTIFIER</Word>
+      <Word>DATE</Word><Word>TIME</Word><Word>TIMESTAMP</Word><Word>TIMESTAMPTZ</Word><Word>DATETIME</Word>
+      <Word>DATETIME2</Word><Word>DATETIMEOFFSET</Word><Word>INTERVAL</Word><Word>ZONE</Word>
+      <Word>JSON</Word><Word>JSONB</Word><Word>XML</Word><Word>BYTEA</Word><Word>BINARY</Word><Word>VARBINARY</Word>
+      <Word>BLOB</Word><Word>CLOB</Word><Word>ARRAY</Word>
+    </Keywords>
+
+    <!-- Any identifier directly followed by "(" is a function call. -->
+    <Rule color="Function">\b[A-Za-z_][A-Za-z0-9_]*(?=\s*\()</Rule>
+
+    <Rule color="Number">\b[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?\b</Rule>
+    <Rule color="Operator">[=&lt;&gt;!+\-*/%|&amp;^~:;,.()]</Rule>
+
+  </RuleSet>
+</SyntaxDefinition>

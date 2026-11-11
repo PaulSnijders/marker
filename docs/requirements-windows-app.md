@@ -17,6 +17,10 @@ note-taking and casual editing of text files. Built with WPF + AvalonEdit on
   tabs — **Tree**, **Find** (find in files) and **Replace** (replace in files) —
   all scoped to the active workspace via the switcher above them.
 - Draggable splitter. Window size, position and pane width persist between runs.
+- The whole sidebar (workspace switcher, Tree, Find, Replace) can be hidden via
+  View ▸ Sidebar or Ctrl+B, leaving just the editor. The choice persists. Any
+  action that needs the sidebar brings it back: Ctrl+T / Ctrl+Shift+T, find or
+  replace in files, switch / new / rename workspace, add folder.
 - Light and dark themes (toggle in the View menu). The whole UI — menus,
   scrollbars, title bar — follows the theme.
 - A black splash screen with the logo shows on launch (no white flash).
@@ -98,11 +102,14 @@ note-taking and casual editing of text files. Built with WPF + AvalonEdit on
 | Extension          | Highlighting | Modes                  |
 |--------------------|--------------|------------------------|
 | `.md`, `.markdown` | Markdown     | Source / Rich / Read   |
-| `.txt`, `.csv`, `.log` | None     | Edit                   |
+| `.txt`, `.log`     | None         | Edit                   |
+| `.csv`, `.tsv`     | None         | Source / Grid          |
 | `.json`            | JSON         | Edit                   |
 | `.xml`, `.html`    | XML / HTML   | Edit                   |
 | `.yaml`, `.yml`    | YAML         | Edit                   |
+| `.sql`             | SQL          | Edit                   |
 | `.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.webp`, `.ico` | — | Image preview |
+| `.pdf`             | —            | PDF viewer (read-only) |
 | Other text         | None         | Edit                   |
 | Binary             | —            | "Binary file" placeholder |
 
@@ -110,6 +117,17 @@ Images are shown inline in a dedicated image host (no file lock, so they can be
 edited elsewhere while open). Clicking the image opens the Windows "Open with…"
 dialog to hand it to another program. (`.svg` is treated as text/XML, not an
 image.)
+
+PDFs are shown by WebView2's built-in PDF viewer (no extra dependency).
+
+CSV/TSV open in **Grid** mode by default (mode remembered per file, Ctrl+M
+toggles Source). The separator is auto-detected (`,` `;` tab `|`) and can be
+overridden per tab in the grid bar (not persisted). Every row is data; the first
+row is shown bold. Grid edits are written back to the text on save, mode/tab
+switch and close; ragged rows stay ragged, quotes are only added where needed.
+
+Adding a type: a `FileView` value (if it needs a new host), a line in
+`FileTypeRegistry`, and a case in `MainWindow.ApplyTab`.
 
 Encoding: UTF-8 by default. Detects BOM, preserves CRLF/LF line endings on save.
 
@@ -124,19 +142,20 @@ Ctrl+M cycles them:
   isn't on disk yet).
 - **Read** — rendered HTML (Markdig) with code-block highlighting.
 
-The mode is app-wide: switching it on one markdown tab applies to every open
-markdown tab and is remembered for newly opened files. The scratchpad always
-opens in Source.
+The mode is per file: switching it applies to the current tab only and is
+remembered per file in the workspace. A file without a remembered mode opens in
+the default mode, set under View ▸ Default Mode for New Files. The scratchpad's
+default is always Source. Help always opens in Read.
 
 ## 7. Settings
 
 - App-wide preferences: `%APPDATA%\Marker\settings.json` — theme, font,
-  auto-save, ignore patterns, recent files, window layout, the app-wide markdown
-  mode, the find-in-files toggle state, and the active workspace name. Editing it
+  auto-save, ignore patterns, recent files, window layout and sidebar
+  visibility, the default markdown mode, the find-in-files toggle state, and the active workspace name. Editing it
   by hand is fine.
 - Each workspace is its own JSON file in `%APPDATA%\Marker\workspaces\`,
   holding its name, folders, open files, expanded tree folders, the last active
-  file, and a per-file caret/scroll snapshot. Scratchpads live in
+  file, a per-file caret/scroll snapshot, and the per-file markdown mode. Scratchpads live in
   `%APPDATA%\Marker\scratch\`.
 - Everything is written immediately on every change, atomically — nothing is
   lost on a crash.
@@ -173,6 +192,6 @@ No DI container — a simple static service locator.
 
 - Sync, cloud, server; mobile or web versions.
 - Plugin system, bidirectional linking, graph view.
-- Git integration, spell check, PDF viewer. (Images are previewed but not edited.)
+- Git integration, spell check. (Images and PDFs are previewed but not edited.)
 - Cross-platform (Windows only).
 - Automated tests (skipped for v1).

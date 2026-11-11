@@ -48,7 +48,28 @@ Open a `.md` file and switch how you see it — per tab, any time:
 | **Rich**   | WYSIWYG editing — format without typing symbols |
 | **Read**   | The finished, rendered page                     |
 
-Use the **View** menu, or press **Ctrl+M** to cycle through them.
+Use the **View** menu, or press **Ctrl+M** to cycle through them. Marker
+remembers the mode for each file. A file you haven't switched yet opens in the
+default mode, which you set under **View ▸ Default Markdown Mode for New Files**. The
+scratchpad always starts in Source.
+
+## CSV and TSV as a grid
+
+`.csv` and `.tsv` files open in **Grid** mode: a spreadsheet-like table you can
+edit cell by cell, add rows to (the empty last row) or delete rows from (select
+the row number, press Delete). **Ctrl+M** switches to **Source** for the raw text.
+The separator (comma, semicolon, tab, pipe) is detected automatically; pick
+another one in the bar above the grid if the guess is wrong.
+
+## PDF
+
+`.pdf` files open read-only in the built-in PDF viewer, with zoom, search and print.
+
+## Just the file, no tree
+
+Press **Ctrl+B** (or **View ▸ Sidebar**) to hide the sidebar and keep only the
+file in view. It comes back on its own when you need it: focus the tree,
+find or replace in files, or switch workspace.
 
 ## The scratchpad
 
@@ -90,8 +111,9 @@ then prompt you on close like Notepad does.
 | `Ctrl+1`…`9`     | Jump to tab 1–9              |
 | `Ctrl+F`         | Find                         |
 | `Ctrl+H`         | Replace                      |
-| `Ctrl+M`         | Cycle markdown mode          |
+| `Ctrl+M`         | Cycle view mode              |
 | `Ctrl+T`         | Focus the file tree          |
+| `Ctrl+B`         | Show / hide the sidebar      |
 | `Ctrl+Shift+W`   | Switch workspace             |
 | `Alt`            | Open the menu bar            |
 | `Esc`            | Show / hide the cheat sheet  |

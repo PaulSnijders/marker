@@ -161,7 +161,17 @@
                           Click="OnModeRich" />
                 <MenuItem x:Name="ModeReadItem" Header="Read Mode" IsCheckable="True"
                           Click="OnModeRead" />
+                <MenuItem x:Name="ModeGridItem" Header="Grid Mode (CSV/TSV)" IsCheckable="True"
+                          Click="OnModeGrid" />
                 <MenuItem Header="Cycle Mode" InputGestureText="Ctrl+M" Click="OnCycleMode" />
+                <MenuItem Header="Default Markdown Mode for New Files" x:Name="DefaultModeMenu">
+                    <MenuItem Header="Source" Tag="Source" IsCheckable="True" Click="OnSetDefaultMode" />
+                    <MenuItem Header="Rich (WYSIWYG)" Tag="Rich" IsCheckable="True" Click="OnSetDefaultMode" />
+                    <MenuItem Header="Read" Tag="Read" IsCheckable="True" Click="OnSetDefaultMode" />
+                </MenuItem>
+                <Separator />
+                <MenuItem x:Name="SidebarItem" Header="Sidebar (Tree, Find, Workspaces)"
+                          InputGestureText="Ctrl+B" IsCheckable="True" Click="OnToggleSidebar" />
                 <Separator />
                 <MenuItem x:Name="WordWrapItem" Header="Word Wrap (Source Mode)"
                           IsCheckable="True" Click="OnToggleWordWrap" />
@@ -222,12 +232,12 @@
         <Grid>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="TreeColumn" Width="260" MinWidth="120" />
-                <ColumnDefinition Width="5" />
+                <ColumnDefinition x:Name="SplitterColumn" Width="5" />
                 <ColumnDefinition Width="*" MinWidth="260" />
             </Grid.ColumnDefinitions>
 
             <!-- File tree -->
-            <Border Grid.Column="0" Background="{DynamicResource PanelBackground}"
+            <Border x:Name="Sidebar" Grid.Column="0" Background="{DynamicResource PanelBackground}"
                     BorderBrush="{DynamicResource BorderBrushColor}" BorderThickness="0,0,1,0"
                     AllowDrop="True">
                 <Grid>
@@ -285,7 +295,7 @@
                 </Grid>
             </Border>
 
-            <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch"
+            <GridSplitter x:Name="SidebarSplitter" Grid.Column="1" Width="5" HorizontalAlignment="Stretch"
                           Background="{DynamicResource BorderBrushColor}" />
 
             <!-- Editor area -->
@@ -332,6 +342,7 @@
                                            Foreground="{DynamicResource AppForeground}"
                                            Padding="20,12" />
                     <wv2:WebView2 x:Name="Web" Visibility="Collapsed" />
+                    <views:CsvGridView x:Name="GridHost" Visibility="Collapsed" />
                     <ScrollViewer x:Name="ImageHost" Visibility="Collapsed"
                                   Background="{DynamicResource EditorBackground}"
                                   HorizontalScrollBarVisibility="Auto"

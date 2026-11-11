@@ -1,0 +1,92 @@
+<UserControl x:Class="Marker.App.Views.CsvGridView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="{DynamicResource EditorBackground}"
+             Foreground="{DynamicResource AppForeground}">
+    <DockPanel>
+        <!-- Separator picker: auto-detected by default, overridable per tab. -->
+        <Border DockPanel.Dock="Top" Background="{DynamicResource PanelBackground}"
+                BorderBrush="{DynamicResource BorderBrushColor}" BorderThickness="0,0,0,1"
+                Padding="8,4">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="Separator:" VerticalAlignment="Center" Margin="0,0,6,0"
+                           Foreground="{DynamicResource MutedForeground}" />
+                <ComboBox x:Name="SeparatorBox" Width="190" Height="24"
+                          VerticalContentAlignment="Center"
+                          SelectionChanged="OnSeparatorSelected" />
+                <TextBlock x:Name="InfoText" VerticalAlignment="Center" Margin="12,0,0,0"
+                           Foreground="{DynamicResource MutedForeground}" />
+            </StackPanel>
+        </Border>
+
+        <DataGrid x:Name="Grid"
+                  AutoGenerateColumns="False"
+                  CanUserAddRows="True" CanUserDeleteRows="True"
+                  CanUserSortColumns="False" CanUserReorderColumns="False"
+                  SelectionUnit="CellOrRowHeader"
+                  EnableRowVirtualization="True" EnableColumnVirtualization="True"
+                  VirtualizingPanel.VirtualizationMode="Recycling"
+                  HeadersVisibility="All" RowHeaderWidth="48"
+                  Background="{DynamicResource EditorBackground}"
+                  Foreground="{DynamicResource AppForeground}"
+                  RowBackground="{DynamicResource EditorBackground}"
+                  AlternatingRowBackground="{DynamicResource HoverBackground}"
+                  BorderThickness="0"
+                  HorizontalGridLinesBrush="{DynamicResource BorderBrushColor}"
+                  VerticalGridLinesBrush="{DynamicResource BorderBrushColor}"
+                  LoadingRow="OnLoadingRow">
+            <DataGrid.Resources>
+                <!-- The app-wide TextBox style has a border/corner that is too
+                     heavy inside a cell; keep the edit box flat. -->
+                <Style x:Key="CellEditBox" TargetType="TextBox">
+                    <Setter Property="Background" Value="{DynamicResource EditorBackground}" />
+                    <Setter Property="Foreground" Value="{DynamicResource AppForeground}" />
+                    <Setter Property="CaretBrush" Value="{DynamicResource AppForeground}" />
+                    <Setter Property="BorderThickness" Value="0" />
+                    <Setter Property="Padding" Value="2,0" />
+                </Style>
+            </DataGrid.Resources>
+            <DataGrid.ColumnHeaderStyle>
+                <Style TargetType="DataGridColumnHeader">
+                    <Setter Property="Background" Value="{DynamicResource PanelBackground}" />
+                    <Setter Property="Foreground" Value="{DynamicResource MutedForeground}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushColor}" />
+                    <Setter Property="BorderThickness" Value="0,0,1,1" />
+                    <Setter Property="Padding" Value="6,3" />
+                    <Setter Property="HorizontalContentAlignment" Value="Center" />
+                </Style>
+            </DataGrid.ColumnHeaderStyle>
+            <DataGrid.RowHeaderStyle>
+                <Style TargetType="DataGridRowHeader">
+                    <Setter Property="Background" Value="{DynamicResource PanelBackground}" />
+                    <Setter Property="Foreground" Value="{DynamicResource MutedForeground}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushColor}" />
+                    <Setter Property="BorderThickness" Value="0,0,1,1" />
+                    <Setter Property="Padding" Value="6,0" />
+                </Style>
+            </DataGrid.RowHeaderStyle>
+            <DataGrid.CellStyle>
+                <Style TargetType="DataGridCell">
+                    <Setter Property="BorderThickness" Value="0" />
+                    <Setter Property="Padding" Value="4,2" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="DataGridCell">
+                                <Border Background="{TemplateBinding Background}"
+                                        Padding="{TemplateBinding Padding}">
+                                    <ContentPresenter />
+                                </Border>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                    <Style.Triggers>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Background" Value="{DynamicResource SelectedBackground}" />
+                            <Setter Property="Foreground" Value="{DynamicResource AppForeground}" />
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.CellStyle>
+        </DataGrid>
+    </DockPanel>
+</UserControl>

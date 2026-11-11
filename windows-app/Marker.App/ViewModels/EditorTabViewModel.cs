@@ -17,7 +17,7 @@ public sealed partial class EditorTabViewModel : ObservableObject
     [ObservableProperty] private string _filePath;
     [ObservableProperty] private string _title;
     [ObservableProperty] private bool _isDirty;
-    [ObservableProperty] private MarkdownMode _mode;
+    [ObservableProperty] private ViewMode _mode;
 
     /// <summary>
     /// Disk LastWriteTime (UTC) the last time we read or wrote this file —
@@ -69,27 +69,39 @@ public sealed partial class EditorTabViewModel : ObservableObject
     /// <summary>True when the file is binary and cannot be edited.</summary>
     public bool IsBinary { get; }
 
+    /// <summary>Which host shows this tab; a text type that sniffed as binary has none.</summary>
+    public FileView View => FileType.View;
+
     /// <summary>True when markdown view-mode switching applies to this tab.</summary>
-    public bool IsMarkdown => FileType.IsMarkdown && !IsBinary;
+    public bool IsMarkdown => View == FileView.Markdown && !IsBinary;
 
     /// <summary>
-    /// True when this tab is a raster image — rendered in the dedicated image
-    /// host rather than the text editor.
+    /// True when this tab holds editable text — the only tabs that can be
+    /// dirty or saved. Images/PDFs are shown from disk and never written.
     /// </summary>
-    public bool IsImage => FileType.IsImage;
+    public bool IsEditable => FileType.IsText && !IsBinary;
+
+    /// <summary>View modes this tab can switch between (just Source for most).</summary>
+    public IReadOnlyList<ViewMode> Modes => IsBinary ? [ViewMode.Source] : FileType.Modes;
+
+    /// <summary>
+    /// CSV/TSV separator picked by the user for the grid view; <c>null</c>
+    /// means auto-detect. Session-only, not persisted.
+    /// </summary>
+    public char? CsvSeparator { get; set; }
 
     public string EncodingLabel => _origin.EncodingLabel;
     public string LineEndingLabel => _origin.LineEndingLabel;
     public string TypeName => IsBinary ? "Binary" : FileType.DisplayName;
 
-    public EditorTabViewModel(string path, TextFileContent content, FileTypeInfo type, MarkdownMode initialMode)
+    public EditorTabViewModel(string path, TextFileContent content, FileTypeInfo type, ViewMode initialMode)
     {
         _filePath = path;
         _title = Path.GetFileName(path);
         _origin = content;
         FileType = type;
         IsBinary = content.IsBinary;
-        _mode = type.IsMarkdown ? initialMode : MarkdownMode.Source;
+        _mode = type.Modes.Contains(initialMode) ? initialMode : ViewMode.Source;
 
         Document = new TextDocument(content.IsBinary ? string.Empty : content.Text);
         // Subscribe after construction so the initial load is not "dirty".

@@ -36,7 +36,9 @@ public partial class MainWindow : Window
 
     private EditorTabViewModel? _currentTab;     // tab shown in the AvalonEdit host
     private EditorTabViewModel? _webTab;         // tab currently driving the WebView2
-    private MarkdownMode _webMode;
+    private EditorTabViewModel? _gridTab;        // tab currently shown in the CSV grid
+    private string? _webPdfUri;                  // PDF the WebView2 may navigate to
+    private ViewMode _webMode;
     private bool _nextChangeFromPaste;           // one-shot: strip <br> tags emitted by Toast UI
     private bool _webReady;                      // CoreWebView2 initialized
     private bool _webAvailable = true;           // false if WebView2 runtime missing
@@ -64,6 +66,8 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        GridHost.Edited += OnGridEdited;
+        GridHost.SeparatorChosen += OnGridSeparatorChosen;
         DataContext = _vm;
         CheatsheetItems.ItemsSource = BuildCheatsheet();
 
@@ -174,7 +178,7 @@ public partial class MainWindow : Window
         {
             var tab = _vm.Tabs.FirstOrDefault(
                 t => string.Equals(t.FilePath, path, StringComparison.OrdinalIgnoreCase));
-            if (tab is null || tab.IsBinary)
+            if (tab is null || !tab.IsEditable)
                 continue;
             try
             {
@@ -184,6 +188,8 @@ public partial class MainWindow : Window
                 tab.Document.Text = fresh.Text;
                 tab.IsDirty = false;
                 CaptureDiskStamp(tab);
+                if (ReferenceEquals(tab, _gridTab))
+                    LoadGrid(tab);
             }
             catch
             {
@@ -209,6 +215,7 @@ public partial class MainWindow : Window
             WindowState = WindowState.Maximized;
 
         TreeColumn.Width = new GridLength(Math.Max(120, s.TreePaneWidth));
+        SetSidebarVisible(s.ShowSidebar);
     }
 
     private void ConfigureEditor()
@@ -223,6 +230,7 @@ public partial class MainWindow : Window
         Editor.Options.EnableHyperlinks = false;
         WordWrapItem.IsChecked = s.WordWrap;
         UpdateFontSizeMenu();
+        UpdateDefaultModeMenu();
 
         // Small gap between the line-number margin and the text.
         Editor.TextArea.LeftMargins.Add(new Border { Width = 6 });
@@ -375,7 +383,7 @@ public partial class MainWindow : Window
             return true;
         }
 
-        foreach (var tab in _vm.Tabs.Where(t => t.IsDirty && !t.IsBinary).ToList())
+        foreach (var tab in _vm.Tabs.Where(t => t.IsDirty && t.IsEditable).ToList())
         {
             var answer = MessageBox.Show(this,
                 $"Save changes to {tab.Title}?", "Marker",
@@ -400,7 +408,9 @@ public partial class MainWindow : Window
         s.WindowTop = bounds.Top;
         s.WindowWidth = bounds.Width;
         s.WindowHeight = bounds.Height;
-        s.TreePaneWidth = TreeColumn.ActualWidth;
+        // A hidden (or not-yet-laid-out) sidebar keeps its last real width.
+        if (Sidebar.Visibility == Visibility.Visible && TreeColumn.ActualWidth > 0)
+            s.TreePaneWidth = TreeColumn.ActualWidth;
         // Open files are stored per workspace — see SaveActiveWorkspace.
     }
 
@@ -644,6 +654,12 @@ public partial class MainWindow : Window
         }
         _activeWorkspace.FilePositions = positions;
 
+        // Per-file modes outlive the tab (so a reopened file keeps its view),
+        // but entries for files that no longer exist drop out.
+        foreach (string path in _activeWorkspace.FileModes.Keys.ToList())
+            if (!File.Exists(path))
+                _activeWorkspace.FileModes.Remove(path);
+
         try { AppServices.SaveWorkspace(_activeWorkspace); }
         catch { /* a workspace write must never interrupt the user */ }
     }
@@ -702,14 +718,14 @@ public partial class MainWindow : Window
             return;
         }
 
-        bool useWeb = tab.IsMarkdown && tab.Mode != MarkdownMode.Source &&
-                      _webAvailable && _webReady;
-        if (useWeb)
+        if (Web.Visibility == Visibility.Visible)
             Web.Focus();
-        else if (tab.IsImage || tab.IsBinary)
-            TreeViewMain.Focus();
-        else
+        else if (GridHost.Visibility == Visibility.Visible)
+            GridHost.FocusGrid();
+        else if (Editor.Visibility == Visibility.Visible)
             Editor.TextArea.Focus();
+        else
+            TreeViewMain.Focus();
     }
 
     private void OnSwitchWorkspace(object sender, RoutedEventArgs e) => OpenWorkspaceSwitcher();
@@ -720,6 +736,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void OpenWorkspaceSwitcher()
     {
+        SetSidebarVisible(true);
         WorkspaceSelector.Focus();
         WorkspaceSelector.IsDropDownOpen = true;
     }
@@ -739,6 +756,7 @@ public partial class MainWindow : Window
         AppServices.SaveWorkspace(ws);
         _vm.AllWorkspaces.Add(ws);
         SwitchToWorkspace(ws);
+        SetSidebarVisible(true);
     }
 
     private void OnRenameWorkspace(object sender, RoutedEventArgs e)
@@ -755,6 +773,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        SetSidebarVisible(true);
         string oldScratch = ResolveScratchpadPath();
         ws.Name = name;
         AppServices.Settings.ActiveWorkspace = name;
@@ -835,7 +854,10 @@ public partial class MainWindow : Window
             return;
         var dialog = new OpenFolderDialog { Title = "Add Folder to Workspace" };
         if (dialog.ShowDialog(this) == true)
+        {
+            SetSidebarVisible(true);
             AddFolderToWorkspace(dialog.FolderName);
+        }
     }
 
     /// <summary>Adds a folder as a tree root of the active workspace.</summary>
@@ -910,6 +932,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void FocusTree()
     {
+        SetSidebarVisible(true);
         if (_vm.RootFolders.Count == 0)
         {
             TreeViewMain.Focus();
@@ -1139,9 +1162,9 @@ public partial class MainWindow : Window
         try
         {
             var type = AppServices.FileTypes.Resolve(path);
-            // Images are rendered in the image host, so we never read or decode
-            // the bytes as text — an empty TextFileContent is just a placeholder.
-            var content = type.IsImage
+            // Images/PDFs are rendered straight from disk, so we never read or
+            // decode the bytes as text — an empty TextFileContent is a placeholder.
+            var content = !type.IsText
                 ? new Marker.Core.FileSystem.TextFileContent()
                 : AppServices.Files.ReadText(path);
             var mode = InitialModeFor(path, type);
@@ -1324,16 +1347,30 @@ public partial class MainWindow : Window
         return result;
     }
 
-    private static MarkdownMode InitialModeFor(string path, FileTypeInfo type)
+    /// <summary>
+    /// The mode a file opens in: the one the user last picked for it in this
+    /// workspace, else the type's default (markdown: the configured default,
+    /// CSV/TSV: the grid). The scratchpad is a writing surface, so its default
+    /// is always Source.
+    /// </summary>
+    private ViewMode InitialModeFor(string path, FileTypeInfo type)
     {
-        if (!type.IsMarkdown)
-            return MarkdownMode.Source;
-
-        // The scratchpad is a writing surface — always start it editable.
+        if (type.Modes.Count < 2)
+            return ViewMode.Source;
+        if (IsHelpFile(path))
+            return ViewMode.Read;
+        if (_activeWorkspace is not null &&
+            _activeWorkspace.FileModes.TryGetValue(path, out var remembered) &&
+            type.Modes.Contains(remembered))
+            return remembered;
         if (IsScratchpadFile(path))
-            return MarkdownMode.Source;
-
-        return AppServices.Settings.DefaultMarkdownMode;
+            return ViewMode.Source;
+        return type.View switch
+        {
+            FileView.Markdown => AppServices.Settings.DefaultMarkdownMode,
+            FileView.Table => ViewMode.Grid,
+            _ => ViewMode.Source
+        };
     }
 
     // --- scratchpad ---------------------------------------------------
@@ -1402,7 +1439,7 @@ public partial class MainWindow : Window
             return;
         }
         OpenFile(HelpFilePath);
-        SetMode(MarkdownMode.Read);
+        SetMode(ViewMode.Read);
     }
 
     private void ReopenFiles(Workspace ws)
@@ -1466,10 +1503,11 @@ public partial class MainWindow : Window
         // Snapshot the scroll position of the tab we are leaving before its
         // document is swapped out — caret line/column are already live-tracked.
         CaptureCurrentTabPosition();
+        FlushGrid();
 
         // Auto-save the tab we are leaving, then show the newly selected one.
         if (AppServices.Settings.AutoSave &&
-            _currentTab is { IsDirty: true, IsBinary: false } leaving &&
+            _currentTab is { IsDirty: true, IsEditable: true } leaving &&
             leaving != _vm.SelectedTab)
         {
             SaveTab(leaving);
@@ -1485,7 +1523,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void CaptureCurrentTabPosition()
     {
-        if (_currentTab is null || _currentTab.IsImage || _currentTab.IsBinary)
+        if (_currentTab is null || !_currentTab.IsEditable)
             return;
         // Only meaningful while the shared editor is actually showing this tab.
         if (!ReferenceEquals(Editor.Document, _currentTab.Document))
@@ -1547,7 +1585,9 @@ public partial class MainWindow : Window
 
     private void CloseTab(EditorTabViewModel tab)
     {
-        if (tab.IsDirty && !tab.IsBinary)
+        if (ReferenceEquals(tab, _gridTab))
+            FlushGrid();
+        if (tab.IsDirty && tab.IsEditable)
         {
             if (AppServices.Settings.AutoSave)
             {
@@ -1569,6 +1609,11 @@ public partial class MainWindow : Window
         tab.PropertyChanged -= OnTabPropertyChanged;
         if (_webTab == tab)
             _webTab = null;
+        if (_gridTab == tab)
+        {
+            _gridTab = null;
+            GridHost.Clear();
+        }
         if (_previewTab == tab)
             _previewTab = null;
         _vm.Tabs.Remove(tab);
@@ -1710,11 +1755,12 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (tab.IsImage)
+        // The grid only lives while its tab is shown in Grid mode.
+        if (_gridTab is not null && (!ReferenceEquals(_gridTab, tab) || tab.Mode != ViewMode.Grid))
         {
-            LoadImageInto(ImageView, tab.FilePath);
-            ShowHost(ImageHost);
-            return;
+            FlushGrid();
+            _gridTab = null;
+            GridHost.Clear();
         }
 
         if (tab.IsBinary)
@@ -1723,15 +1769,40 @@ public partial class MainWindow : Window
             return;
         }
 
+        bool webOk = _webAvailable && _webReady;
+        switch (tab.View)
+        {
+            case FileView.Image:
+                LoadImageInto(ImageView, tab.FilePath);
+                ShowHost(ImageHost);
+                return;
+
+            case FileView.Pdf:
+                if (!webOk) { ShowHost(BinaryNotice); return; }
+                ShowHost(Web);
+                NavigatePdf(tab);
+                return;
+        }
+
         // Keep the editor document in sync so returning to source is instant.
         Editor.Document = tab.Document;
         RestoreTabPosition(tab);
 
-        bool useWeb = tab.IsMarkdown && tab.Mode != MarkdownMode.Source && _webAvailable && _webReady;
-        if (useWeb)
+        if (tab.Mode == ViewMode.Grid)
+        {
+            if (!ReferenceEquals(_gridTab, tab))
+            {
+                _gridTab = tab;
+                LoadGrid(tab);
+            }
+            ShowHost(GridHost);
+            if (!keepTreeFocus)
+                Dispatcher.BeginInvoke(() => GridHost.FocusGrid(), DispatcherPriority.Input);
+        }
+        else if (tab.IsMarkdown && tab.Mode != ViewMode.Source && webOk)
         {
             ShowHost(Web);
-            if (tab.Mode == MarkdownMode.Rich)
+            if (tab.Mode == ViewMode.Rich)
                 NavigateRich(tab);
             else
                 NavigateRead(tab);
@@ -1749,6 +1820,7 @@ public partial class MainWindow : Window
     {
         Editor.Visibility = target == Editor ? Visibility.Visible : Visibility.Collapsed;
         Web.Visibility = target == Web ? Visibility.Visible : Visibility.Collapsed;
+        GridHost.Visibility = target == GridHost ? Visibility.Visible : Visibility.Collapsed;
         ImageHost.Visibility = target == ImageHost ? Visibility.Visible : Visibility.Collapsed;
         BinaryNotice.Visibility = target == BinaryNotice ? Visibility.Visible : Visibility.Collapsed;
         EmptyState.Visibility = target == EmptyState ? Visibility.Visible : Visibility.Collapsed;
@@ -1852,10 +1924,59 @@ public partial class MainWindow : Window
     private static IHighlightingDefinition? ResolveHighlighting(string? name)
         => name is null ? null : HighlightingManager.Instance.GetDefinition(name);
 
+    /// <summary>
+    /// Shows a PDF with the WebView2's built-in viewer (the same one Edge
+    /// uses), straight from disk. The exact URI is whitelisted for
+    /// <see cref="OnWebNavigationStarting"/>, which cancels other file:// loads.
+    /// </summary>
+    private void NavigatePdf(EditorTabViewModel tab)
+    {
+        _webTab = null;
+        _webMode = ViewMode.Read;
+        _webPdfUri = new Uri(tab.FilePath).AbsoluteUri;
+        Web.CoreWebView2.Navigate(_webPdfUri);
+    }
+
+    // --- CSV/TSV grid -------------------------------------------------
+
+    private void LoadGrid(EditorTabViewModel tab)
+    {
+        char fallback = tab.FilePath.EndsWith(".tsv", StringComparison.OrdinalIgnoreCase) ? '\t' : ',';
+        GridHost.Load(tab.Document.Text, tab.CsvSeparator, fallback);
+    }
+
+    /// <summary>
+    /// Writes pending grid edits back into the tab's text document. Called
+    /// before anything that reads the text: save, mode/tab switch, close.
+    /// </summary>
+    private void FlushGrid()
+    {
+        if (_gridTab is null) return;
+        string? text = GridHost.TakeText();
+        if (text is not null && text != _gridTab.Document.Text)
+            _gridTab.Document.Text = text;   // one undo step in Source mode
+    }
+
+    private void OnGridEdited(object? sender, EventArgs e)
+    {
+        if (_gridTab is null) return;
+        _gridTab.IsDirty = true;
+        _gridTab.HasEdits = true;
+    }
+
+    private void OnGridSeparatorChosen(object? sender, char? separator)
+    {
+        if (_gridTab is not { } tab) return;
+        FlushGrid();                    // keep edits made with the old separator
+        tab.CsvSeparator = separator;
+        LoadGrid(tab);
+    }
+
     private void NavigateRich(EditorTabViewModel tab)
     {
         _webTab = tab;
-        _webMode = MarkdownMode.Rich;
+        _webMode = ViewMode.Rich;
+        _webPdfUri = null;
         EnsureTabDocHost(tab);
         // The &v=… cache-buster matches NavigateRead — without it WebView2
         // happily serves a stale editor.html after the app is updated.
@@ -1866,7 +1987,8 @@ public partial class MainWindow : Window
     private void NavigateRead(EditorTabViewModel tab)
     {
         _webTab = tab;
-        _webMode = MarkdownMode.Read;
+        _webMode = ViewMode.Read;
+        _webPdfUri = null;
         EnsureTabDocHost(tab);
         string html = BuildReadHtml(tab.Document.Text);
         File.WriteAllText(ReadFilePath, html, new UTF8Encoding(false));
@@ -1905,7 +2027,7 @@ public partial class MainWindow : Window
             using var doc = JsonDocument.Parse(e.TryGetWebMessageAsString());
             string type = doc.RootElement.GetProperty("type").GetString() ?? "";
 
-            if (type == "ready" && _webMode == MarkdownMode.Rich && _webTab is not null)
+            if (type == "ready" && _webMode == ViewMode.Rich && _webTab is not null)
             {
                 PushMarkdownToEditor(_webTab.Document.Text);
             }
@@ -2104,7 +2226,8 @@ public partial class MainWindow : Window
         if (uri.StartsWith("https://marker.assets/__read.html", StringComparison.OrdinalIgnoreCase) ||
             uri.StartsWith("https://marker.assets/editor.html", StringComparison.OrdinalIgnoreCase) ||
             uri.StartsWith("about:", StringComparison.OrdinalIgnoreCase) ||
-            uri.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            uri.StartsWith("data:", StringComparison.OrdinalIgnoreCase) ||
+            (_webPdfUri is not null && uri.StartsWith(_webPdfUri, StringComparison.OrdinalIgnoreCase)))
             return;
 
         e.Cancel = true;
@@ -2184,49 +2307,116 @@ public partial class MainWindow : Window
     //  Markdown mode switching
     // ================================================================
 
-    private void OnModeSource(object sender, RoutedEventArgs e) => SetMode(MarkdownMode.Source);
-    private void OnModeRich(object sender, RoutedEventArgs e) => SetMode(MarkdownMode.Rich);
-    private void OnModeRead(object sender, RoutedEventArgs e) => SetMode(MarkdownMode.Read);
+    private void OnModeSource(object sender, RoutedEventArgs e) => SetMode(ViewMode.Source);
+    private void OnModeRich(object sender, RoutedEventArgs e) => SetMode(ViewMode.Rich);
+    private void OnModeRead(object sender, RoutedEventArgs e) => SetMode(ViewMode.Read);
+    private void OnModeGrid(object sender, RoutedEventArgs e) => SetMode(ViewMode.Grid);
 
+    /// <summary>Ctrl+M: steps through the modes the active tab's type supports.</summary>
     private void OnCycleMode(object sender, RoutedEventArgs e)
     {
-        if (_vm.SelectedTab is not { IsMarkdown: true } tab)
+        if (_vm.SelectedTab is not { } tab || tab.Modes.Count < 2)
             return;
-        var next = tab.Mode switch
-        {
-            MarkdownMode.Source => MarkdownMode.Rich,
-            MarkdownMode.Rich => MarkdownMode.Read,
-            _ => MarkdownMode.Source
-        };
-        SetMode(next);
+        int i = Math.Max(0, tab.Modes.ToList().IndexOf(tab.Mode));
+        SetMode(tab.Modes[(i + 1) % tab.Modes.Count]);
     }
 
-    private void SetMode(MarkdownMode mode)
+    /// <summary>Switches the active tab's mode and remembers it for that file.</summary>
+    private void SetMode(ViewMode mode)
     {
-        if (_vm.SelectedTab is not { IsMarkdown: true })
+        if (_vm.SelectedTab is not { } tab || !tab.Modes.Contains(mode))
             return;
 
-        // One mode app-wide: update every open markdown tab so switching
-        // away and back keeps the chosen view.
-        foreach (var t in _vm.Tabs)
-            if (t.IsMarkdown)
-                t.Mode = mode;
-
-        AppServices.Settings.DefaultMarkdownMode = mode;
-
+        FlushGrid();
+        tab.Mode = mode;
         ApplyTab();
-        SaveSettingsNow();
+
+        // The help document belongs to no workspace.
+        if (_activeWorkspace is not null && !IsHelpFile(tab.FilePath))
+        {
+            _activeWorkspace.FileModes[tab.FilePath] = mode;
+            SaveActiveWorkspace();
+        }
+    }
+
+    private void OnSetDefaultMode(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: string tag } && Enum.TryParse(tag, out ViewMode mode))
+        {
+            AppServices.Settings.DefaultMarkdownMode = mode;
+            SaveSettingsNow();
+        }
+        UpdateDefaultModeMenu();
+    }
+
+    /// <summary>Ticks the default-mode menu entry matching the current setting.</summary>
+    private void UpdateDefaultModeMenu()
+    {
+        string current = AppServices.Settings.DefaultMarkdownMode.ToString();
+        foreach (object obj in DefaultModeMenu.Items)
+            if (obj is MenuItem { Tag: string tag } item)
+                item.IsChecked = tag == current;
+    }
+
+    // ================================================================
+    //  Sidebar (workspace switcher, tree, find, replace)
+    // ================================================================
+
+    private void OnToggleSidebar(object sender, RoutedEventArgs e) => ToggleSidebar();
+
+    private void ToggleSidebar()
+    {
+        bool show = Sidebar.Visibility != Visibility.Visible;
+        bool hadFocus = Sidebar.IsKeyboardFocusWithin;
+        SetSidebarVisible(show);
+        if (!show && hadFocus)
+            FocusActiveTabContent();
+    }
+
+    /// <summary>
+    /// Shows or hides the whole sidebar. Hiding leaves just the editor, for
+    /// reading or writing without the tree in view. Anything that needs the
+    /// sidebar (focus tree, find/replace in files, workspace actions) calls
+    /// this with <c>true</c>, so it always comes back on its own.
+    /// </summary>
+    private void SetSidebarVisible(bool visible)
+    {
+        var s = AppServices.Settings;
+        bool wasVisible = Sidebar.Visibility == Visibility.Visible;
+        if (!visible && wasVisible && TreeColumn.ActualWidth > 0)
+            s.TreePaneWidth = TreeColumn.ActualWidth;   // restore to this width later
+
+        Sidebar.Visibility = SidebarSplitter.Visibility =
+            visible ? Visibility.Visible : Visibility.Collapsed;
+        TreeColumn.MinWidth = visible ? 120 : 0;
+        if (visible != wasVisible)
+            TreeColumn.Width = visible
+                ? new GridLength(Math.Max(120, s.TreePaneWidth))
+                : new GridLength(0);
+        SplitterColumn.Width = new GridLength(visible ? 5 : 0);
+        SidebarItem.IsChecked = visible;
+
+        if (s.ShowSidebar != visible)
+        {
+            s.ShowSidebar = visible;
+            SaveSettingsNow();
+        }
     }
 
     private void UpdateModeMenu()
     {
         var tab = _vm.SelectedTab;
-        bool markdown = tab is { IsMarkdown: true };
+        IReadOnlyList<ViewMode> modes = tab is null || tab.Modes.Count < 2 ? [] : tab.Modes;
 
-        ModeSourceItem.IsEnabled = ModeRichItem.IsEnabled = ModeReadItem.IsEnabled = markdown;
-        ModeSourceItem.IsChecked = markdown && tab!.Mode == MarkdownMode.Source;
-        ModeRichItem.IsChecked = markdown && tab!.Mode == MarkdownMode.Rich;
-        ModeReadItem.IsChecked = markdown && tab!.Mode == MarkdownMode.Read;
+        void Set(MenuItem item, ViewMode mode)
+        {
+            item.IsEnabled = modes.Contains(mode);
+            item.IsChecked = item.IsEnabled && tab!.Mode == mode;
+        }
+        Set(ModeSourceItem, ViewMode.Source);
+        Set(ModeRichItem, ViewMode.Rich);
+        Set(ModeReadItem, ViewMode.Read);
+        Set(ModeGridItem, ViewMode.Grid);
     }
 
     // ================================================================
@@ -2235,7 +2425,7 @@ public partial class MainWindow : Window
 
     private void OnSave(object sender, RoutedEventArgs e)
     {
-        if (_vm.SelectedTab is { IsBinary: false } tab)
+        if (_vm.SelectedTab is { IsEditable: true } tab)
             SaveTab(tab);
     }
 
@@ -2243,12 +2433,15 @@ public partial class MainWindow : Window
 
     private void SaveAllDirty(bool silent)
     {
-        foreach (var tab in _vm.Tabs.Where(t => t.IsDirty && !t.IsBinary).ToList())
+        foreach (var tab in _vm.Tabs.Where(t => t.IsDirty && t.IsEditable).ToList())
             SaveTab(tab, silent);
     }
 
     private void SaveTab(EditorTabViewModel tab, bool silent = false)
     {
+        if (!tab.IsEditable) return;   // never write an image/PDF placeholder over the file
+        if (ReferenceEquals(tab, _gridTab))
+            FlushGrid();
         try
         {
             AppServices.Files.WriteText(tab.FilePath, tab.ToContent());
@@ -2295,7 +2488,7 @@ public partial class MainWindow : Window
     {
         if (_checkingExternalChange) return;
         if (_vm.SelectedTab is not { } tab) return;
-        if (tab.IsBinary || string.IsNullOrEmpty(tab.FilePath)) return;
+        if (string.IsNullOrEmpty(tab.FilePath)) return;
 
         FileInfo info;
         try
@@ -2307,6 +2500,15 @@ public partial class MainWindow : Window
 
         if (info.LastWriteTimeUtc == tab.DiskTimestampUtc && info.Length == tab.DiskSize)
             return;   // matches what we last loaded/wrote — nothing changed
+
+        // Images/PDFs are shown straight from disk: just show the new version.
+        if (!tab.IsEditable)
+        {
+            CaptureDiskStamp(tab);
+            if (tab.View is FileView.Image or FileView.Pdf)
+                ApplyTab();
+            return;
+        }
 
         _checkingExternalChange = true;
         try
@@ -2362,6 +2564,8 @@ public partial class MainWindow : Window
 
         tab.ReloadFrom(fresh);
         CaptureDiskStamp(tab);
+        if (ReferenceEquals(tab, _gridTab))
+            LoadGrid(tab);
 
         if (editorVisible)
         {
@@ -2373,7 +2577,7 @@ public partial class MainWindow : Window
         // Refresh the rendered side too when the tab is driving the WebView.
         if (ReferenceEquals(tab, _webTab))
         {
-            if (_webMode == MarkdownMode.Rich)
+            if (_webMode == ViewMode.Rich)
                 PushMarkdownToEditor(tab.Document.Text);
             else
                 NavigateRead(tab);
@@ -2629,12 +2833,16 @@ public partial class MainWindow : Window
 
     private void OnUndo(object sender, RoutedEventArgs e)
     {
+        FlushGrid();
         if (Editor.CanUndo) Editor.Undo();
+        if (_gridTab is not null) LoadGrid(_gridTab);
     }
 
     private void OnRedo(object sender, RoutedEventArgs e)
     {
+        FlushGrid();
         if (Editor.CanRedo) Editor.Redo();
+        if (_gridTab is not null) LoadGrid(_gridTab);
     }
 
     private async void OnFind(object sender, RoutedEventArgs e)
@@ -2745,6 +2953,7 @@ public partial class MainWindow : Window
         if (_findVm is null)
             return;
         SeedSidebarQuery(s => _findVm.SearchText = s);
+        SetSidebarVisible(true);
         SidebarTabs.SelectedIndex = 1;
         Dispatcher.BeginInvoke(() => FindInFiles.FocusSearchBox(), DispatcherPriority.Input);
     }
@@ -2755,6 +2964,7 @@ public partial class MainWindow : Window
         if (_replaceVm is null)
             return;
         SeedSidebarQuery(s => _replaceVm.SearchText = s);
+        SetSidebarVisible(true);
         SidebarTabs.SelectedIndex = 2;
         Dispatcher.BeginInvoke(() => ReplaceInFiles.FocusSearchBox(), DispatcherPriority.Input);
     }
@@ -2762,6 +2972,7 @@ public partial class MainWindow : Window
     /// <summary>Ctrl+Shift+T — flip the sidebar back to the Tree tab and focus the tree.</summary>
     private void OpenTreeTab()
     {
+        SetSidebarVisible(true);
         SidebarTabs.SelectedIndex = 0;
         Dispatcher.BeginInvoke(() => FocusTree(), DispatcherPriority.Input);
     }
@@ -2790,8 +3001,8 @@ public partial class MainWindow : Window
     {
         OpenFile(e.FilePath);
 
-        if (_vm.SelectedTab is { IsMarkdown: true, Mode: not MarkdownMode.Source })
-            SetMode(MarkdownMode.Source);
+        if (_vm.SelectedTab is { Mode: not ViewMode.Source })
+            SetMode(ViewMode.Source);
 
         if (Editor.Visibility != Visibility.Visible || Editor.Document is null)
             return;
@@ -2940,6 +3151,10 @@ public partial class MainWindow : Window
                 OnCycleMode(sender, e); e.Handled = true; break;
             case Key.T when ctrl:
                 FocusTree(); e.Handled = true; break;
+            // Ctrl+B is bold in the rich editor, so leave it there.
+            case Key.B when ctrl && !shift && !alt &&
+                            !(Web.IsKeyboardFocusWithin && _vm.SelectedTab is { Mode: ViewMode.Rich }):
+                ToggleSidebar(); e.Handled = true; break;
             case >= Key.D1 and <= Key.D9 when ctrl:
                 SelectTabByNumber(e.Key - Key.D1); e.Handled = true; break;
         }
@@ -2991,8 +3206,9 @@ public partial class MainWindow : Window
         new("Shift+Alt+R", "Reveal in Explorer"),
         new("Shift+Alt+C", "Copy full path"),
         new("F3", "Find next  ·  Shift+F3  find previous"),
-        new("Ctrl+M", "Cycle markdown mode"),
+        new("Ctrl+M", "Cycle view mode (markdown, CSV)"),
         new("Ctrl+T", "Focus the file tree"),
+        new("Ctrl+B", "Show / hide the sidebar"),
         new("Ctrl+Shift+W", "Switch workspace"),
         new("Alt", "Open the menu bar"),
         new("Esc", "Show / hide this cheat sheet"),
